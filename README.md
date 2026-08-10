@@ -2,7 +2,7 @@
 
 ALLOG API 및 백엔드 서버 애플리케이션 전용 저장소입니다.
 
-현재는 기술 스택 확정 전 초기 구조만 포함합니다. Spring Boot 등 실제 서버 프레임워크 초기화는 팀 합의 후 진행합니다.
+Java 21, Spring Boot, Gradle 기반의 백엔드 애플리케이션입니다.
 
 ## Repository Links
 
@@ -52,7 +52,12 @@ ALLOG API 및 백엔드 서버 애플리케이션 전용 저장소입니다.
 
 ## Local Development
 
-로컬 실행 방법은 백엔드 기술 스택 확정 후 추가합니다.
+Java 21이 필요합니다.
+
+```bash
+./gradlew test
+./gradlew bootRun
+```
 
 ## Environment Variables
 

@@ -1,5 +1,7 @@
 # Source
 
-백엔드 소스 코드가 위치할 예정인 디렉터리입니다.
+Spring Boot 애플리케이션 소스와 테스트가 위치합니다.
 
-서버 프레임워크 프로젝트는 기술 스택 합의 후 초기화합니다.
+- `main/java/com/allog`: Java 애플리케이션 소스
+- `main/resources`: Spring Boot 설정
+- `test/java/com/allog`: Java 테스트

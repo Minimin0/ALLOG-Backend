@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: allog-backend
+  datasource:
+    url: "jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:allog}"
+    username: "${DB_USERNAME:allog}"
+    password: "${DB_PASSWORD:}"
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+ai:
+  openai:
+    api-key: "${OPENAI_API_KEY:}"
+  coach:
+    model: "${AI_COACH_MODEL:}"
+    timeout: "${AI_COACH_TIMEOUT:3s}"
