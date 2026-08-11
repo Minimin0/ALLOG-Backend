@@ -2,7 +2,7 @@ spring:
   application:
     name: allog-backend
   datasource:
-    url: "jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:allog}"
+    url: "jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:allog}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
     username: "${DB_USERNAME:allog}"
     password: "${DB_PASSWORD:}"
   jpa:

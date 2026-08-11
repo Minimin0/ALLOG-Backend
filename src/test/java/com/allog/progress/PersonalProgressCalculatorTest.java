@@ -22,7 +22,6 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -425,7 +424,7 @@ class PersonalProgressCalculatorTest {
                 user,
                 GroupMemberRole.MEMBER,
                 GroupMemberStatus.ACTIVE,
-                LocalDateTime.of(2026, 8, 1, 9, 0)
+                Instant.parse("2026-08-01T09:00:00Z")
         );
         return new Fixture(member, schedule);
     }

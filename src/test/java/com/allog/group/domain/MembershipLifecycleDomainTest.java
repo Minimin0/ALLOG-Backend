@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MembershipLifecycleDomainTest {
 
-    private static final LocalDateTime ACTIVATION_TIME = LocalDateTime.of(2026, 8, 11, 10, 0);
+    private static final Instant ACTIVATION_TIME = Instant.parse("2026-08-11T10:00:00Z");
 
     @Test
     void joinedMemberStartsWithoutOfficialParticipationHistory() {
@@ -76,7 +76,7 @@ class MembershipLifecycleDomainTest {
                 User.create(),
                 GroupMemberRole.MEMBER,
                 status,
-                LocalDateTime.of(2026, 8, 10, 9, 0)
+                Instant.parse("2026-08-10T09:00:00Z")
         );
     }
 

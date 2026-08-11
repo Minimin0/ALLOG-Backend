@@ -13,9 +13,10 @@ import com.allog.user.domain.User;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Set;
 
@@ -30,10 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VerificationTest {
 
     private static final Clock FIRST = Clock.fixed(
-            java.time.Instant.parse("2026-08-11T10:00:00Z"), ZoneOffset.UTC
+            Instant.parse("2026-08-11T10:00:00Z"), ZoneOffset.UTC
     );
     private static final Clock SECOND = Clock.fixed(
-            java.time.Instant.parse("2026-08-11T11:00:00Z"), ZoneOffset.UTC
+            Instant.parse("2026-08-11T11:00:00Z"), ZoneOffset.UTC
     );
 
     @Test
@@ -58,9 +59,24 @@ class VerificationTest {
 
         assertAll(
                 () -> assertEquals(VerificationStatus.APPROVED, verification.getStatus()),
-                () -> assertEquals(LocalDateTime.of(2026, 8, 11, 10, 0), verification.getSubmittedAt()),
-                () -> assertEquals(LocalDateTime.of(2026, 8, 11, 11, 0), verification.getApprovedAt()),
+                () -> assertEquals(FIRST.instant(), verification.getSubmittedAt()),
+                () -> assertEquals(SECOND.instant(), verification.getApprovedAt()),
                 () -> assertTrue(verification.getStatus().countsAsProgress())
+        );
+    }
+
+    @Test
+    void eventTimestampDoesNotDependOnClockZone() {
+        Instant eventTime = Instant.parse("2026-08-11T15:30:00.123456Z");
+        Verification utc = verification();
+        Verification seoul = verification();
+
+        utc.submit(Clock.fixed(eventTime, ZoneOffset.UTC));
+        seoul.submit(Clock.fixed(eventTime, ZoneId.of("Asia/Seoul")));
+
+        assertAll(
+                () -> assertEquals(eventTime, utc.getSubmittedAt()),
+                () -> assertEquals(eventTime, seoul.getSubmittedAt())
         );
     }
 
@@ -83,7 +99,7 @@ class VerificationTest {
 
         assertAll(
                 () -> assertEquals(VerificationStatus.SUBMITTED, verification.getStatus()),
-                () -> assertEquals(LocalDateTime.of(2026, 8, 11, 11, 0), verification.getSubmittedAt())
+                () -> assertEquals(SECOND.instant(), verification.getSubmittedAt())
         );
     }
 
@@ -120,7 +136,7 @@ class VerificationTest {
 
         assertAll(
                 () -> assertEquals(VerificationStatus.INVALIDATED, verification.getStatus()),
-                () -> assertEquals(LocalDateTime.of(2026, 8, 11, 11, 0), verification.getInvalidatedAt()),
+                () -> assertEquals(SECOND.instant(), verification.getInvalidatedAt()),
                 () -> assertFalse(verification.getStatus().countsAsProgress())
         );
     }
@@ -170,7 +186,7 @@ class VerificationTest {
                 user,
                 GroupMemberRole.OWNER,
                 GroupMemberStatus.ACTIVE,
-                LocalDateTime.of(2026, 8, 1, 9, 0)
+                Instant.parse("2026-08-01T09:00:00Z")
         );
         Verification verification = Verification.create(member, schedule, LocalDate.of(2026, 8, 11));
         assertNotNull(verification);

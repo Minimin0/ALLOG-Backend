@@ -40,7 +40,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -254,7 +253,7 @@ class ProductionAiCoachIntegrationTest {
                         user,
                         index == 0 ? GroupMemberRole.OWNER : GroupMemberRole.MEMBER,
                         memberStatuses[index],
-                        LocalDateTime.of(2026, 8, 1, 9, index)
+                        Instant.parse("2026-08-01T09:00:00Z").plusSeconds(60L * index)
                 );
                 entityManager.persist(member);
                 entityManager.flush();

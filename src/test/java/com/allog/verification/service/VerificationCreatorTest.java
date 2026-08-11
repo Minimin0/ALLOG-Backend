@@ -19,8 +19,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Set;
 
@@ -103,7 +103,7 @@ class VerificationCreatorTest {
                 user,
                 GroupMemberRole.OWNER,
                 GroupMemberStatus.ACTIVE,
-                LocalDateTime.of(2026, 8, 1, 9, 0)
+                Instant.parse("2026-08-01T09:00:00Z")
         );
         return new Fixture(member, schedule);
     }

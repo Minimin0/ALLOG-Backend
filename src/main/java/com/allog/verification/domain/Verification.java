@@ -18,8 +18,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Set;
 
@@ -63,13 +63,13 @@ public class Verification extends BaseTimeEntity {
     private VerificationStatus status;
 
     @Column(name = "submitted_at")
-    private LocalDateTime submittedAt;
+    private Instant submittedAt;
 
     @Column(name = "approved_at")
-    private LocalDateTime approvedAt;
+    private Instant approvedAt;
 
     @Column(name = "invalidated_at")
-    private LocalDateTime invalidatedAt;
+    private Instant invalidatedAt;
 
     protected Verification() {
     }
@@ -91,7 +91,7 @@ public class Verification extends BaseTimeEntity {
 
     public void submit(Clock clock) {
         transitionTo(VerificationStatus.SUBMITTED, VerificationStatus.PENDING_UPLOAD, VerificationStatus.RETRY_REQUIRED);
-        submittedAt = LocalDateTime.now(requireClock(clock));
+        submittedAt = requireClock(clock).instant();
     }
 
     public void startProcessing() {
@@ -100,7 +100,7 @@ public class Verification extends BaseTimeEntity {
 
     public void approve(Clock clock) {
         transitionTo(VerificationStatus.APPROVED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
-        approvedAt = LocalDateTime.now(requireClock(clock));
+        approvedAt = requireClock(clock).instant();
     }
 
     public void requestReview() {
@@ -121,7 +121,7 @@ public class Verification extends BaseTimeEntity {
 
     public void invalidate(Clock clock) {
         transitionTo(VerificationStatus.INVALIDATED, VerificationStatus.APPROVED);
-        invalidatedAt = LocalDateTime.now(requireClock(clock));
+        invalidatedAt = requireClock(clock).instant();
     }
 
     public Long getId() {
@@ -144,15 +144,15 @@ public class Verification extends BaseTimeEntity {
         return status;
     }
 
-    public LocalDateTime getSubmittedAt() {
+    public Instant getSubmittedAt() {
         return submittedAt;
     }
 
-    public LocalDateTime getApprovedAt() {
+    public Instant getApprovedAt() {
         return approvedAt;
     }
 
-    public LocalDateTime getInvalidatedAt() {
+    public Instant getInvalidatedAt() {
         return invalidatedAt;
     }
 

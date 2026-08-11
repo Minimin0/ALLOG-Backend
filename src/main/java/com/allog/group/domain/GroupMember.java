@@ -16,7 +16,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 
 @Entity
@@ -57,10 +57,10 @@ public class GroupMember extends BaseTimeEntity {
     private GroupMemberStatus status;
 
     @Column(name = "joined_at", nullable = false)
-    private LocalDateTime joinedAt;
+    private Instant joinedAt;
 
     @Column(name = "participation_started_at")
-    private LocalDateTime participationStartedAt;
+    private Instant participationStartedAt;
 
     protected GroupMember() {
     }
@@ -70,7 +70,7 @@ public class GroupMember extends BaseTimeEntity {
             User user,
             GroupMemberRole role,
             GroupMemberStatus status,
-            LocalDateTime joinedAt
+            Instant joinedAt
     ) {
         this.routineGroup = Objects.requireNonNull(routineGroup, "routineGroup must not be null");
         this.user = Objects.requireNonNull(user, "user must not be null");
@@ -99,16 +99,16 @@ public class GroupMember extends BaseTimeEntity {
         return status;
     }
 
-    public LocalDateTime getJoinedAt() {
+    public Instant getJoinedAt() {
         return joinedAt;
     }
 
-    public LocalDateTime getParticipationStartedAt() {
+    public Instant getParticipationStartedAt() {
         return participationStartedAt;
     }
 
-    public void startParticipation(LocalDateTime activationTime) {
-        LocalDateTime startedAt = Objects.requireNonNull(activationTime, "activationTime must not be null");
+    public void startParticipation(Instant activationTime) {
+        Instant startedAt = Objects.requireNonNull(activationTime, "activationTime must not be null");
         if (status != GroupMemberStatus.JOINED || participationStartedAt != null) {
             throw new IllegalStateException("only a not-yet-started JOINED member can start participation");
         }

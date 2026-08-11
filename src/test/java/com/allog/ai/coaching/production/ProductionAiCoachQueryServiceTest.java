@@ -24,7 +24,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -112,7 +111,7 @@ class ProductionAiCoachQueryServiceTest {
                 User.create(),
                 GroupMemberRole.MEMBER,
                 GroupMemberStatus.ACTIVE,
-                LocalDateTime.of(2026, 8, 1, 9, 0)
+                Instant.parse("2026-08-01T09:00:00Z")
         );
         ReflectionTestUtils.setField(inconsistent, "id", 10L);
         when(groupMemberRepository.findByRoutineGroup_IdAndUser_Id(GROUP_ID, USER_ID))
@@ -234,9 +233,9 @@ class ProductionAiCoachQueryServiceTest {
                     index == 0 ? creator : User.create(),
                     index == 0 ? GroupMemberRole.OWNER : GroupMemberRole.MEMBER,
                     GroupMemberStatus.JOINED,
-                    LocalDateTime.of(2026, 8, 1, 9, index)
+                    Instant.parse("2026-08-01T09:00:00Z").plusSeconds(60L * index)
             );
-            member.startParticipation(LocalDateTime.of(2026, 8, 7, 0, 0));
+            member.startParticipation(Instant.parse("2026-08-07T00:00:00Z"));
             ReflectionTestUtils.setField(member, "id", 10L + index);
             members.add(member);
         }

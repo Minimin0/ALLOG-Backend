@@ -21,8 +21,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Set;
 
@@ -112,7 +112,7 @@ class CorePersistenceTest {
                 fixture.user(),
                 GroupMemberRole.OWNER,
                 GroupMemberStatus.ACTIVE,
-                LocalDateTime.of(2026, 8, 11, 9, 0)
+                Instant.parse("2026-08-11T09:00:00Z")
         );
         groupMemberRepository.saveAndFlush(member);
         entityManager.clear();
@@ -128,7 +128,7 @@ class CorePersistenceTest {
     @Test
     void preventsDuplicateMembership() {
         Fixture fixture = fixture();
-        LocalDateTime joinedAt = LocalDateTime.of(2026, 8, 11, 9, 0);
+        Instant joinedAt = Instant.parse("2026-08-11T09:00:00Z");
         entityManager.persist(new GroupMember(
                 fixture.group(), fixture.user(), GroupMemberRole.OWNER, GroupMemberStatus.ACTIVE, joinedAt
         ));

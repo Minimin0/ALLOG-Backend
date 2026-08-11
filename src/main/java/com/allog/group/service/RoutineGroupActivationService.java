@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -53,7 +53,7 @@ public class RoutineGroupActivationService {
             throw new IllegalStateException("routine group requires at least one JOINED member to activate");
         }
 
-        LocalDateTime activationTime = LocalDateTime.now(clock);
+        Instant activationTime = clock.instant();
         participants.forEach(member -> member.startParticipation(activationTime));
         group.activate();
     }

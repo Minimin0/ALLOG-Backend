@@ -23,7 +23,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class RoutineGroupActivationServiceTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-11T10:00:00Z"), ZoneOffset.UTC);
-    private static final LocalDateTime ACTIVATION_TIME = LocalDateTime.of(2026, 8, 11, 10, 0);
+    private static final Instant ACTIVATION_TIME = Instant.parse("2026-08-11T10:00:00Z");
 
     @Autowired
     private RoutineGroupActivationService service;
@@ -170,7 +169,7 @@ class RoutineGroupActivationServiceTest {
         Fixture fixture = fixture(RoutineGroupStatus.FULL, GroupMemberStatus.JOINED);
         jdbcTemplate.update(
                 "UPDATE group_member SET participation_started_at = ? WHERE id = ?",
-                Timestamp.valueOf(ACTIVATION_TIME),
+                Timestamp.from(ACTIVATION_TIME),
                 fixture.memberIds().getFirst()
         );
 
@@ -243,7 +242,7 @@ class RoutineGroupActivationServiceTest {
                     user,
                     GroupMemberRole.MEMBER,
                     GroupMemberStatus.JOINED,
-                    LocalDateTime.of(2026, 8, 11, 11, 0)
+                    Instant.parse("2026-08-11T11:00:00Z")
             );
             entityManager.persist(member);
             entityManager.flush();
@@ -279,7 +278,7 @@ class RoutineGroupActivationServiceTest {
                         user,
                         index == 0 ? GroupMemberRole.OWNER : GroupMemberRole.MEMBER,
                         memberStatuses[index],
-                        LocalDateTime.of(2026, 8, 10, 9, index)
+                        Instant.parse("2026-08-10T09:00:00Z").plusSeconds(60L * index)
                 );
                 entityManager.persist(member);
                 entityManager.flush();
