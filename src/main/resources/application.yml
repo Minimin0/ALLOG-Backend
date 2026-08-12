@@ -18,3 +18,9 @@ ai:
   coach:
     model: "${AI_COACH_MODEL:}"
     timeout: "${AI_COACH_TIMEOUT:3s}"
+
+allog:
+  auth:
+    firebase:
+      enabled: "${FIREBASE_AUTH_ENABLED:false}"
+      project-id: "${FIREBASE_PROJECT_ID:}"
