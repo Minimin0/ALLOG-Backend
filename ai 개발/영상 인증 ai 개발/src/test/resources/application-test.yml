@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:allog_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+
+allog:
+  vision:
+    anthropic-api-key: test-key-not-used
+    model: claude-sonnet-5
