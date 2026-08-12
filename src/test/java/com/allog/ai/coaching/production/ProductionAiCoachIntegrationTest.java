@@ -7,6 +7,8 @@ import com.allog.ai.coaching.domain.RoutineState;
 import com.allog.ai.coaching.dto.AiCoachText;
 import com.allog.ai.coaching.dto.CoachContext;
 import com.allog.ai.coaching.provider.AiCoachProvider;
+import com.allog.auth.security.AllogPrincipal;
+import com.allog.auth.security.FirebaseBearerAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -28,11 +30,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -54,10 +58,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:production-ai-coach;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1"
 })
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(ProductionAiCoachIntegrationTest.TestConfig.class)
 class ProductionAiCoachIntegrationTest {
@@ -81,6 +90,9 @@ class ProductionAiCoachIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private MockMvc mockMvc;
 
     private TransactionTemplate transaction;
 
@@ -112,6 +124,39 @@ class ProductionAiCoachIntegrationTest {
         assertFalse(provider.transactionActive());
         assertEquals("아침 물 마시기", provider.context().challenge().name());
         assertEquals(0.8, provider.context().group().completionRate());
+    }
+
+    @Test
+    void servesProductionFactsThroughAuthenticatedHttpEndpoint() throws Exception {
+        Fixture fixture = activeFixture(GroupMemberStatus.JOINED);
+
+        mockMvc.perform(get("/api/v1/groups/{groupId}/ai-coach", fixture.groupId())
+                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                                new AllogPrincipal(fixture.members().getFirst().userId())
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("생성 제목"))
+                .andExpect(jsonPath("$.message").value("생성 메시지"))
+                .andExpect(jsonPath("$.participationStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.generationType").value("AI"));
+
+        assertEquals(1, provider.calls());
+        assertFalse(provider.transactionActive());
+    }
+
+    @Test
+    void cannotImpersonateMemberWithClientSuppliedUserId() throws Exception {
+        Fixture fixture = lifecycleFixture(RoutineGroupStatus.RECRUITING, GroupMemberStatus.JOINED);
+
+        mockMvc.perform(get("/api/v1/groups/{groupId}/ai-coach", fixture.groupId())
+                        .queryParam("userId", fixture.members().getFirst().userId().toString())
+                        .header("X-User-Id", fixture.members().getFirst().userId())
+                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                                new AllogPrincipal(999999L)
+                        ))))
+                .andExpect(status().isNotFound());
+
+        assertEquals(0, provider.calls());
     }
 
     @ParameterizedTest
