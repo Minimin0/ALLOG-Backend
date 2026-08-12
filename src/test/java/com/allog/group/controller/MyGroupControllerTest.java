@@ -6,9 +6,16 @@ import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
 import com.allog.group.domain.RoutineGroupStatus;
+import com.allog.group.dto.MyGroupDetailResponse;
+import com.allog.group.dto.MyGroupDetailResponse.Group;
+import com.allog.group.dto.MyGroupDetailResponse.Membership;
+import com.allog.group.dto.MyGroupDetailResponse.Routine;
+import com.allog.group.dto.MyGroupDetailResponse.Schedule;
 import com.allog.group.dto.MyGroupsResponse;
 import com.allog.group.dto.MyGroupsResponse.Item;
+import com.allog.group.service.MyGroupNotFoundException;
 import com.allog.group.service.MyGroupQueryService;
+import com.allog.routine.domain.ScheduleType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,8 +27,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -107,6 +118,72 @@ class MyGroupControllerTest {
     }
 
     @Test
+    void returnsMemberScopedDetailUsingOnlyPrincipalIdentity() throws Exception {
+        when(queryService.readMyGroup(USER_ID, 42L)).thenReturn(new MyGroupDetailResponse(
+                new Group(42L, "아침 물 마시기", GroupVisibility.PRIVATE,
+                        RoutineGroupStatus.ACTIVE, 10, 5),
+                new Routine("물 마시기", "매일 물 2L 마시기"),
+                new Schedule(
+                        ScheduleType.SPECIFIC_DAYS,
+                        LocalDate.of(2026, 8, 10),
+                        LocalDate.of(2026, 8, 24),
+                        LocalTime.of(22, 0),
+                        "Asia/Seoul",
+                        List.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY)
+                ),
+                new Membership(GroupMemberRole.MEMBER, GroupMemberStatus.ACTIVE)
+        ));
+
+        mockMvc.perform(authenticatedDetailGet(42L)
+                        .queryParam("userId", "999999")
+                        .header("X-User-Id", "999999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.*", hasSize(4)))
+                .andExpect(jsonPath("$.group.*", hasSize(6)))
+                .andExpect(jsonPath("$.routine.*", hasSize(2)))
+                .andExpect(jsonPath("$.schedule.*", hasSize(6)))
+                .andExpect(jsonPath("$.membership.*", hasSize(2)))
+                .andExpect(jsonPath("$.group.groupId").value(42))
+                .andExpect(jsonPath("$.group.visibility").value("PRIVATE"))
+                .andExpect(jsonPath("$.schedule.specificDays", contains(
+                        "MONDAY", "WEDNESDAY", "FRIDAY"
+                )))
+                .andExpect(jsonPath("$.membership.myStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.userId").doesNotExist())
+                .andExpect(jsonPath("$.membership.groupMemberId").doesNotExist());
+
+        verify(queryService).readMyGroup(USER_ID, 42L);
+        verify(queryService, never()).readMyGroup(999999L, 42L);
+    }
+
+    @Test
+    void missingMyGroupReturnsStatusOnly404() throws Exception {
+        when(queryService.readMyGroup(USER_ID, 42L)).thenThrow(new MyGroupNotFoundException());
+
+        mockMvc.perform(authenticatedDetailGet(42L))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(""));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, -1})
+    void nonPositiveDetailGroupIdReturns400WithoutCallingService(long groupId) throws Exception {
+        mockMvc.perform(authenticatedDetailGet(groupId))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(""));
+
+        verifyNoInteractions(queryService);
+    }
+
+    @Test
+    void unauthenticatedDetailReturns401WithoutCallingService() throws Exception {
+        mockMvc.perform(get(ENDPOINT + "/42"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(queryService);
+    }
+
+    @Test
     void unauthenticatedRequestReturns401WithoutCallingService() throws Exception {
         mockMvc.perform(get(ENDPOINT))
                 .andExpect(status().isUnauthorized());
@@ -137,5 +214,11 @@ class MyGroupControllerTest {
         return get(ENDPOINT).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID)
         )));
+    }
+
+    private MockHttpServletRequestBuilder authenticatedDetailGet(long groupId) {
+        return get(ENDPOINT + "/{groupId}", groupId).with(authentication(
+                FirebaseBearerAuthenticationToken.authenticated(new AllogPrincipal(USER_ID))
+        ));
     }
 }

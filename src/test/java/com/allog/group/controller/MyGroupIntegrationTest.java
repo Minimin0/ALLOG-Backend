@@ -9,6 +9,8 @@ import com.allog.group.domain.GroupVisibility;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineSchedule;
+import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -16,6 +18,8 @@ import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -25,14 +29,20 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -180,13 +190,129 @@ class MyGroupIntegrationTest {
         assertEquals(1, statistics.getPrepareStatementCount());
     }
 
+    @ParameterizedTest
+    @EnumSource(value = GroupMemberStatus.class, names = {"JOINED", "ACTIVE", "COMPLETED", "FAILED"})
+    void returnsPrivateDetailForEveryVisibleMembershipWithNullableSchedule(GroupMemberStatus status) throws Exception {
+        DetailFixture fixture = detailFixture(GroupVisibility.PRIVATE, status, null, Set.of());
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(fixture.userId(), fixture.groupId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.*", hasSize(4)))
+                .andExpect(jsonPath("$.group.*", hasSize(6)))
+                .andExpect(jsonPath("$.group.groupId").value(fixture.groupId()))
+                .andExpect(jsonPath("$.group.visibility").value("PRIVATE"))
+                .andExpect(jsonPath("$.routine.*", hasSize(2)))
+                .andExpect(jsonPath("$.routine.description", nullValue()))
+                .andExpect(jsonPath("$.schedule", nullValue()))
+                .andExpect(jsonPath("$.membership.*", hasSize(2)))
+                .andExpect(jsonPath("$.membership.myStatus").value(status.name()))
+                .andExpect(jsonPath("$.membership.joinedAt").doesNotExist())
+                .andExpect(jsonPath("$.membership.participationStartedAt").doesNotExist())
+                .andExpect(jsonPath("$.membership.groupMemberId").doesNotExist())
+                .andExpect(jsonPath("$.createdByUserId").doesNotExist())
+                .andExpect(jsonPath("$.progress").doesNotExist())
+                .andExpect(jsonPath("$.aiCoach").doesNotExist())
+                .andExpect(jsonPath("$.memberCount").doesNotExist());
+
+        assertEquals(2, statistics.getPrepareStatementCount());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = GroupMemberStatus.class, names = {"LEFT", "REMOVED"})
+    void hidesFormerMembershipDetail(GroupMemberStatus status) throws Exception {
+        DetailFixture fixture = detailFixture(GroupVisibility.PUBLIC, status, ScheduleType.DAILY, Set.of());
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(fixture.userId(), fixture.groupId()))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(""));
+
+        assertEquals(1, statistics.getPrepareStatementCount());
+    }
+
+    @ParameterizedTest
+    @EnumSource(GroupVisibility.class)
+    void hidesOtherUsersGroupRegardlessOfVisibilityAndIgnoresSpoofedIdentity(GroupVisibility visibility)
+            throws Exception {
+        CrossUserFixture fixture = crossUserFixture(visibility);
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(fixture.currentUserId(), fixture.groupId())
+                        .queryParam("userId", fixture.otherUserId().toString())
+                        .header("X-User-Id", fixture.otherUserId()))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(""));
+
+        assertEquals(1, statistics.getPrepareStatementCount());
+    }
+
+    @Test
+    void nonexistentGroupReturnsSameStatusOnly404() throws Exception {
+        Long userId = inTransaction(() -> {
+            User user = persistUser();
+            entityManager.flush();
+            return user.getId();
+        });
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(userId, Long.MAX_VALUE))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(""));
+
+        assertEquals(1, statistics.getPrepareStatementCount());
+    }
+
+    @Test
+    void returnsDailyScheduleWithEmptySpecificDaysInTwoQueries() throws Exception {
+        DetailFixture fixture = detailFixture(
+                GroupVisibility.PUBLIC,
+                GroupMemberStatus.ACTIVE,
+                ScheduleType.DAILY,
+                Set.of()
+        );
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(fixture.userId(), fixture.groupId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schedule.*", hasSize(6)))
+                .andExpect(jsonPath("$.schedule.scheduleType").value("DAILY"))
+                .andExpect(jsonPath("$.schedule.startDate").value("2026-08-10"))
+                .andExpect(jsonPath("$.schedule.endDate").value("2026-08-24"))
+                .andExpect(jsonPath("$.schedule.deadlineTime").value("22:00:00"))
+                .andExpect(jsonPath("$.schedule.timezone").value("Asia/Seoul"))
+                .andExpect(jsonPath("$.schedule.specificDays").isEmpty());
+
+        assertEquals(2, statistics.getPrepareStatementCount());
+    }
+
+    @Test
+    void returnsSpecificDaysInStableWeekdayOrderInTwoQueries() throws Exception {
+        DetailFixture fixture = detailFixture(
+                GroupVisibility.PUBLIC,
+                GroupMemberStatus.ACTIVE,
+                ScheduleType.SPECIFIC_DAYS,
+                Set.of(DayOfWeek.FRIDAY, DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY)
+        );
+        statistics.clear();
+
+        mockMvc.perform(authenticatedDetailGet(fixture.userId(), fixture.groupId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schedule.scheduleType").value("SPECIFIC_DAYS"))
+                .andExpect(jsonPath("$.schedule.specificDays", contains(
+                        "MONDAY", "WEDNESDAY", "FRIDAY"
+                )));
+
+        assertEquals(2, statistics.getPrepareStatementCount());
+    }
+
     private User persistUser() {
         User user = User.create();
         entityManager.persist(user);
         return user;
     }
 
-    private void addMembership(
+    private GroupMember addMembership(
             User user,
             String groupName,
             GroupVisibility visibility,
@@ -206,13 +332,15 @@ class MyGroupIntegrationTest {
                 5
         );
         entityManager.persist(group);
-        entityManager.persist(new GroupMember(
+        GroupMember membership = new GroupMember(
                 group,
                 user,
                 GroupMemberRole.MEMBER,
                 memberStatus,
                 Instant.parse(joinedAt)
-        ));
+        );
+        entityManager.persist(membership);
+        return membership;
     }
 
     private MockHttpServletRequestBuilder authenticatedGet(Long userId) {
@@ -221,10 +349,75 @@ class MyGroupIntegrationTest {
         )));
     }
 
+    private MockHttpServletRequestBuilder authenticatedDetailGet(Long userId, Long groupId) {
+        return get(ENDPOINT + "/{groupId}", groupId).with(authentication(
+                FirebaseBearerAuthenticationToken.authenticated(new AllogPrincipal(userId))
+        ));
+    }
+
+    private DetailFixture detailFixture(
+            GroupVisibility visibility,
+            GroupMemberStatus status,
+            ScheduleType scheduleType,
+            Set<DayOfWeek> specificDays
+    ) {
+        return inTransaction(() -> {
+            User user = persistUser();
+            GroupMember membership = addMembership(
+                    user,
+                    status + " 상세 그룹",
+                    visibility,
+                    RoutineGroupStatus.ACTIVE,
+                    status,
+                    "2026-08-10T10:00:00Z"
+            );
+            if (scheduleType != null) {
+                entityManager.persist(new RoutineSchedule(
+                        membership.getRoutineGroup(),
+                        scheduleType,
+                        LocalDate.of(2026, 8, 10),
+                        LocalDate.of(2026, 8, 24),
+                        LocalTime.of(22, 0),
+                        "Asia/Seoul",
+                        specificDays
+                ));
+            }
+            entityManager.flush();
+            return new DetailFixture(user.getId(), membership.getRoutineGroup().getId());
+        });
+    }
+
+    private CrossUserFixture crossUserFixture(GroupVisibility visibility) {
+        return inTransaction(() -> {
+            User currentUser = persistUser();
+            User otherUser = persistUser();
+            GroupMember membership = addMembership(
+                    otherUser,
+                    visibility + " 타인 그룹",
+                    visibility,
+                    RoutineGroupStatus.ACTIVE,
+                    GroupMemberStatus.ACTIVE,
+                    "2026-08-10T10:00:00Z"
+            );
+            entityManager.flush();
+            return new CrossUserFixture(
+                    currentUser.getId(),
+                    otherUser.getId(),
+                    membership.getRoutineGroup().getId()
+            );
+        });
+    }
+
     private <T> T inTransaction(Supplier<T> work) {
         return transaction.execute(status -> work.get());
     }
 
     private record Fixture(Long currentUserId, Long otherUserId) {
+    }
+
+    private record DetailFixture(Long userId, Long groupId) {
+    }
+
+    private record CrossUserFixture(Long currentUserId, Long otherUserId, Long groupId) {
     }
 }

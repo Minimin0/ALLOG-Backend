@@ -1,8 +1,10 @@
 package com.allog.group.service;
 
 import com.allog.group.domain.GroupMemberStatus;
+import com.allog.group.dto.MyGroupDetailResponse;
 import com.allog.group.dto.MyGroupsResponse;
 import com.allog.group.repository.GroupMemberRepository;
+import com.allog.routine.repository.RoutineScheduleRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -25,9 +27,14 @@ public class MyGroupQueryService {
     );
 
     private final GroupMemberRepository repository;
+    private final RoutineScheduleRepository scheduleRepository;
 
-    public MyGroupQueryService(GroupMemberRepository repository) {
+    public MyGroupQueryService(
+            GroupMemberRepository repository,
+            RoutineScheduleRepository scheduleRepository
+    ) {
         this.repository = repository;
+        this.scheduleRepository = scheduleRepository;
     }
 
     @Transactional(readOnly = true)
@@ -37,5 +44,19 @@ public class MyGroupQueryService {
                 VISIBLE_STATUSES,
                 PageRequest.of(page, size, FIXED_SORT)
         ));
+    }
+
+    @Transactional(readOnly = true)
+    public MyGroupDetailResponse readMyGroup(Long currentUserId, Long groupId) {
+        var membership = repository.findByRoutineGroup_IdAndUser_IdAndStatusIn(
+                        groupId,
+                        currentUserId,
+                        VISIBLE_STATUSES
+                )
+                .orElseThrow(MyGroupNotFoundException::new);
+        return MyGroupDetailResponse.from(
+                membership,
+                scheduleRepository.findByRoutineGroup_Id(groupId).orElse(null)
+        );
     }
 }

@@ -15,6 +15,13 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
 
     Optional<GroupMember> findByRoutineGroup_IdAndUser_Id(Long routineGroupId, Long userId);
 
+    @EntityGraph(attributePaths = {"routineGroup", "routineGroup.routineDefinition"})
+    Optional<GroupMember> findByRoutineGroup_IdAndUser_IdAndStatusIn(
+            Long routineGroupId,
+            Long userId,
+            Collection<GroupMemberStatus> statuses
+    );
+
     List<GroupMember> findAllByRoutineGroup_Id(Long routineGroupId);
 
     List<GroupMember> findAllByRoutineGroup_IdAndParticipationStartedAtIsNotNull(Long routineGroupId);
