@@ -1,11 +1,10 @@
 package com.allog.verification.analysis.domain;
 
 import com.allog.group.domain.RoutineGroup;
-import com.allog.routine.domain.RoutineDefinition;
-import com.allog.routine.domain.RoutineKey;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
+import com.allog.verification.template.domain.VerificationTemplateKey;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -27,7 +26,8 @@ import static org.mockito.Mockito.when;
 class VerificationAnalysisTest {
 
     private static final Instant FIRST_ATTEMPT = Instant.parse("2026-08-14T00:00:00Z");
-    private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    private static final VerificationTemplateKey TEST_TEMPLATE_KEY =
+            new VerificationTemplateKey("TEST_TEMPLATE");
     private static final VerificationCriteria.Reference TEST_REFERENCE =
             new VerificationCriteria.Reference("TEST_EVIDENCE", 1);
 
@@ -80,12 +80,12 @@ class VerificationAnalysisTest {
     }
 
     @Test
-    void bindsCriteriaOnlyToMatchingStableRoutineIdentity() {
-        Verification matching = verification(VerificationStatus.SUBMITTED, TEST_ROUTINE_KEY);
+    void bindsCriteriaOnlyToExactGroupTemplateReference() {
+        Verification matching = verification(VerificationStatus.SUBMITTED, TEST_TEMPLATE_KEY);
         VerificationAnalysis analysis = VerificationAnalysis.createPending(
                 matching,
                 UUID.randomUUID(),
-                criteria(TEST_ROUTINE_KEY)
+                criteria(TEST_TEMPLATE_KEY)
         );
 
         assertAll(
@@ -95,7 +95,7 @@ class VerificationAnalysisTest {
                         () -> VerificationAnalysis.createPending(
                                 matching,
                                 UUID.randomUUID(),
-                                criteria(new RoutineKey("OTHER_TEST_ROUTINE"))
+                                criteria(new VerificationTemplateKey("OTHER_TEST_TEMPLATE"))
                         )
                 ),
                 () -> assertThrows(
@@ -103,7 +103,7 @@ class VerificationAnalysisTest {
                         () -> VerificationAnalysis.createPending(
                                 verification(VerificationStatus.SUBMITTED, null),
                                 UUID.randomUUID(),
-                                criteria(TEST_ROUTINE_KEY)
+                                criteria(TEST_TEMPLATE_KEY)
                         )
                 )
         );
@@ -332,9 +332,9 @@ class VerificationAnalysisTest {
 
     private VerificationAnalysis processingAnalysis() {
         VerificationAnalysis analysis = VerificationAnalysis.createPending(
-                verification(VerificationStatus.SUBMITTED, TEST_ROUTINE_KEY),
+                verification(VerificationStatus.SUBMITTED, TEST_TEMPLATE_KEY),
                 UUID.randomUUID(),
-                criteria(TEST_ROUTINE_KEY)
+                criteria(TEST_TEMPLATE_KEY)
         );
         analysis.startProcessing(FIRST_ATTEMPT);
         return analysis;
@@ -346,23 +346,24 @@ class VerificationAnalysisTest {
         return verification;
     }
 
-    private Verification verification(VerificationStatus status, RoutineKey routineKey) {
+    private Verification verification(VerificationStatus status, VerificationTemplateKey templateKey) {
         Verification verification = verification(status);
         RoutineSchedule schedule = mock(RoutineSchedule.class);
         RoutineGroup group = mock(RoutineGroup.class);
-        RoutineDefinition definition = routineKey == null
-                ? new RoutineDefinition("test routine", null)
-                : new RoutineDefinition(routineKey, "test routine", null);
         when(verification.getRoutineSchedule()).thenReturn(schedule);
         when(schedule.getRoutineGroup()).thenReturn(group);
-        when(group.getRoutineDefinition()).thenReturn(definition);
+        when(group.hasVerificationBinding()).thenReturn(templateKey != null);
+        if (templateKey != null) {
+            when(group.getVerificationTemplateKey()).thenReturn(templateKey);
+            when(group.getVerificationCriteriaReference()).thenReturn(TEST_REFERENCE);
+        }
         return verification;
     }
 
-    private VerificationCriteria criteria(RoutineKey routineKey) {
+    private VerificationCriteria criteria(VerificationTemplateKey templateKey) {
         return new VerificationCriteria(
                 TEST_REFERENCE,
-                routineKey,
+                templateKey,
                 Set.of(VerificationCriteria.MediaModality.VIDEO),
                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                 "Test-only evidence requirements"

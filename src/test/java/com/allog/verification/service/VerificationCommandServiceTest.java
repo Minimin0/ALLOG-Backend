@@ -20,6 +20,7 @@ import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -383,6 +384,7 @@ class VerificationCommandServiceTest {
                 analysisRequestIdGenerator,
                 verificationCreator,
                 mediaPolicy,
+                new VerificationTemplateCatalog(),
                 clock
         );
     }

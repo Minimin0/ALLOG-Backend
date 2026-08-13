@@ -1,7 +1,7 @@
 package com.allog.verification.analysis.domain;
 
-import com.allog.routine.domain.RoutineKey;
 import com.allog.verification.analysis.service.VerificationAnalysisProvider;
+import com.allog.verification.template.domain.VerificationTemplateKey;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class VerificationCriteriaContractTest {
 
-    private static final RoutineKey ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    private static final VerificationTemplateKey TEMPLATE_KEY = new VerificationTemplateKey("TEST_TEMPLATE");
 
     @Test
     void createsImmutableVersionedCriteriaWithoutLeakingRoutineIdentityToProvider() {
@@ -36,7 +36,7 @@ class VerificationCriteriaContractTest {
                         () -> criteria.supportedMedia().add(VerificationCriteria.MediaModality.VIDEO)
                 ),
                 () -> assertFalse(Stream.of(criteria.providerContract().getClass().getRecordComponents())
-                        .anyMatch(component -> component.getName().equals("routineKey")))
+                        .anyMatch(component -> component.getName().equals("templateKey")))
         );
     }
 
@@ -69,7 +69,7 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                ROUTINE_KEY,
+                                TEMPLATE_KEY,
                                 Set.of(),
                                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                                 "test evidence"
@@ -79,7 +79,7 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                ROUTINE_KEY,
+                                TEMPLATE_KEY,
                                 Set.of(VerificationCriteria.MediaModality.PHOTO),
                                 Set.of(),
                                 "test evidence"
@@ -89,7 +89,7 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                ROUTINE_KEY,
+                                TEMPLATE_KEY,
                                 Set.of(VerificationCriteria.MediaModality.PHOTO),
                                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                                 " "
@@ -188,7 +188,7 @@ class VerificationCriteriaContractTest {
     private VerificationCriteria criteria(Set<VerificationCriteria.MediaModality> media) {
         return new VerificationCriteria(
                 new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                ROUTINE_KEY,
+                TEMPLATE_KEY,
                 media,
                 Set.of(
                         VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,

@@ -32,6 +32,7 @@ import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import jakarta.persistence.EntityManager;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +109,9 @@ class VerificationAnalysisPersistenceTest {
 
     @Autowired
     private VerificationAnalysisInputLoader inputLoader;
+
+    @Autowired
+    private VerificationTemplateCatalog verificationTemplateCatalog;
 
     @Autowired
     private VerificationAnalysisWorker productionWorker;
@@ -298,14 +302,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV7() {
+    void flywayAppliedExactlyV1ThroughV8() {
         assertAll(
-                () -> assertEquals(7, jdbcTemplate.queryForObject(
+                () -> assertEquals(8, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '7' and success = true",
+                        "select count(*) from flyway_schema_history where version = '8' and success = true",
                         Integer.class
                 ))
         );
@@ -503,7 +507,8 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
                 () -> assertEquals("OBSERVATION_COMPLETE", analysis.getReasonCode()),
                 () -> assertEquals("synthetic-model", analysis.getProviderModel()),
-                () -> assertEquals("TEST_EVIDENCE@1", analysis.getCriteriaVersion()),
+                () -> assertEquals(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        analysis.getCriteriaVersion()),
                 () -> assertEquals(true, analysis.getObjectPresence()),
                 () -> assertEquals(new BigDecimal("0.7500"), analysis.getRelevanceScore()),
                 () -> assertEquals(false, analysis.getAnomalyDetected()),
@@ -941,7 +946,7 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void loadsCurrentAttemptConfirmedMediaInputWithTwoQueries() {
-        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
         VerificationAnalysisClaim claim = claimService.claimNextPending().orElseThrow();
         SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
         var statistics = sessionFactory.getStatistics();
@@ -962,7 +967,7 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(claim.analysisRequestId(), input.analysisRequestId()),
                 () -> assertEquals(claim.attemptCount(), input.attemptCount()),
                 () -> assertEquals(criteria().reference(), input.criteriaReference()),
-                () -> assertEquals("video/mp4", input.contentType()),
+                () -> assertEquals("image/jpeg", input.contentType()),
                 () -> assertEquals(4, input.sizeBytes()),
                 () -> assertTrue(input.objectKey().startsWith("verification-media/")),
                 () -> assertEquals(2, statements),
@@ -1038,12 +1043,12 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void backendDecisionCanCombineMediaObservationAndCompleteWorkerWithoutExternalTransaction() {
-        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
                 4,
-                "video/mp4",
+                "image/jpeg",
                 new byte[]{1, 2, 3, 4}
         ));
         AtomicBoolean providerTransaction = new AtomicBoolean(true);
@@ -1052,11 +1057,10 @@ class VerificationAnalysisPersistenceTest {
             return providerResult();
         };
         VerificationAnalysisMediaProcessor mediaProcessor = new VerificationAnalysisMediaProcessor(
-                inputLoader, storage, provider
+                inputLoader, storage, provider, verificationTemplateCatalog
         );
         VerificationAnalysisWorker worker = worker(decidingProcessor(
                 mediaProcessor,
-                criteria(),
                 AnalysisRecommendation.PASS
         ));
         clock.resetReads();
@@ -1090,12 +1094,12 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void staleMediaProcessorResultCannotOverwriteCurrentAttempt() throws Exception {
-        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
                 4,
-                "video/mp4",
+                "image/jpeg",
                 new byte[]{1, 2, 3, 4}
         ));
         CountDownLatch providerStarted = new CountDownLatch(1);
@@ -1107,11 +1111,10 @@ class VerificationAnalysisPersistenceTest {
             return providerResult();
         };
         VerificationAnalysisMediaProcessor mediaProcessor = new VerificationAnalysisMediaProcessor(
-                inputLoader, storage, blockingProvider
+                inputLoader, storage, blockingProvider, verificationTemplateCatalog
         );
         VerificationAnalysisWorker oldWorker = worker(decidingProcessor(
                 mediaProcessor,
-                criteria(),
                 AnalysisRecommendation.PASS
         ));
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -1153,7 +1156,7 @@ class VerificationAnalysisPersistenceTest {
 
     private Long pendingAnalysisId() {
         return inTransaction(() -> {
-            Verification verification = persistSubmittedVerification();
+            Verification verification = persistSubmittedVerification(true);
             VerificationAnalysis analysis = VerificationAnalysis.createPending(
                     verification,
                     UUID.randomUUID(),
@@ -1166,7 +1169,7 @@ class VerificationAnalysisPersistenceTest {
 
     private Long pendingAnalysisWithMedia(String contentType, long sizeBytes, boolean confirmed) {
         return inTransaction(() -> {
-            Verification verification = persistSubmittedVerification();
+            Verification verification = persistSubmittedVerification(true);
             VerificationMedia media = VerificationMedia.create(
                     verification,
                     "verification-media/" + UUID.randomUUID(),
@@ -1252,11 +1255,10 @@ class VerificationAnalysisPersistenceTest {
 
     private VerificationAnalysisProcessor decidingProcessor(
             VerificationAnalysisMediaProcessor mediaProcessor,
-            VerificationCriteria criteria,
             AnalysisRecommendation recommendation
     ) {
         return claim -> {
-            VerificationAnalysisMediaProcessor.Outcome outcome = mediaProcessor.process(claim, criteria);
+            VerificationAnalysisMediaProcessor.Outcome outcome = mediaProcessor.process(claim);
             if (outcome instanceof VerificationAnalysisMediaProcessor.Failure failure) {
                 return new VerificationAnalysisProcessor.Failure(failure.failureCode());
             }
@@ -1271,18 +1273,7 @@ class VerificationAnalysisPersistenceTest {
     }
 
     private VerificationCriteria criteria() {
-        return new VerificationCriteria(
-                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                TEST_ROUTINE_KEY,
-                Set.of(VerificationCriteria.MediaModality.VIDEO),
-                Set.of(
-                        VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,
-                        VerificationCriteria.ObservationType.CRITERIA_RELEVANCE_SCORE,
-                        VerificationCriteria.ObservationType.INTEGRITY_ANOMALY,
-                        VerificationCriteria.ObservationType.FRAMING_SUFFICIENCY
-                ),
-                "Test-only evidence requirements"
-        );
+        return verificationTemplateCatalog.requireCriteria(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1);
     }
 
     private VerificationAnalysisProvider.Result providerResult() {
@@ -1307,6 +1298,10 @@ class VerificationAnalysisPersistenceTest {
     }
 
     private Verification persistSubmittedVerification() {
+        return persistSubmittedVerification(false);
+    }
+
+    private Verification persistSubmittedVerification(boolean verificationBound) {
         User user = User.create();
         entityManager.persist(user);
         RoutineDefinition definition = entityManager.createQuery(
@@ -1321,15 +1316,26 @@ class VerificationAnalysisPersistenceTest {
                     entityManager.persist(created);
                     return created;
                 });
-        RoutineGroup group = new RoutineGroup(
-                definition,
-                user,
-                "water group",
-                GroupVisibility.PUBLIC,
-                RoutineGroupStatus.ACTIVE,
-                5,
-                1
-        );
+        RoutineGroup group = verificationBound
+                ? new RoutineGroup(
+                        definition,
+                        user,
+                        "water group",
+                        GroupVisibility.PUBLIC,
+                        RoutineGroupStatus.ACTIVE,
+                        5,
+                        1,
+                        verificationTemplateCatalog.requireTemplate(VerificationTemplateCatalog.MEAL_PHOTO_RECORD)
+                )
+                : new RoutineGroup(
+                        definition,
+                        user,
+                        "water group",
+                        GroupVisibility.PUBLIC,
+                        RoutineGroupStatus.ACTIVE,
+                        5,
+                        1
+                );
         entityManager.persist(group);
         RoutineSchedule schedule = new RoutineSchedule(
                 group,

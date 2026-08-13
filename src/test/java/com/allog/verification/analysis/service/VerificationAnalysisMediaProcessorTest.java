@@ -1,10 +1,10 @@
 package com.allog.verification.analysis.service;
 
-import com.allog.routine.domain.RoutineKey;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -12,7 +12,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
-import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -38,10 +37,10 @@ class VerificationAnalysisMediaProcessorTest {
             CLAIM.analysisId(),
             CLAIM.analysisRequestId(),
             CLAIM.attemptCount(),
-            new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+            VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1,
             20L,
             "verification-media/test",
-            "video/mp4",
+            "image/jpeg",
             4
     );
     private static final VerificationMediaStorage.StoredMedia MEDIA =
@@ -51,7 +50,9 @@ class VerificationAnalysisMediaProcessorTest {
                     INPUT.contentType(),
                     new byte[]{1, 2, 3, 4}
             );
-    private static final VerificationCriteria CRITERIA = criteria(VerificationCriteria.MediaModality.VIDEO);
+    private static final VerificationTemplateCatalog CATALOG = new VerificationTemplateCatalog();
+    private static final VerificationCriteria CRITERIA =
+            CATALOG.requireCriteria(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1);
     private static final VerificationAnalysisProvider.Result PROVIDER_RESULT = providerResult();
 
     @Mock
@@ -73,22 +74,32 @@ class VerificationAnalysisMediaProcessorTest {
         when(provider.analyze(eq(CRITERIA.providerContract()), any())).thenAnswer(invocation -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             VerificationAnalysisProvider.Evidence evidence = invocation.getArgument(1);
-            assertEquals(VerificationCriteria.MediaModality.VIDEO, evidence.modality());
-            assertEquals("video/mp4", evidence.contentType());
+            assertEquals(VerificationCriteria.MediaModality.PHOTO, evidence.modality());
+            assertEquals("image/jpeg", evidence.contentType());
             assertArrayEquals(new byte[]{1, 2, 3, 4}, evidence.content());
             return PROVIDER_RESULT;
         });
 
         assertEquals(
                 new VerificationAnalysisMediaProcessor.Observed(CRITERIA, PROVIDER_RESULT),
-                processor().process(CLAIM, CRITERIA)
+                processor().process(CLAIM)
         );
         verify(provider).analyze(eq(CRITERIA.providerContract()), any());
     }
 
     @Test
     void mapsInvalidOrUnsupportedMediaToBadRequestWithoutProviderCall() {
-        when(inputLoader.load(CLAIM)).thenReturn(INPUT);
+        VerificationAnalysisInput videoInput = new VerificationAnalysisInput(
+                CLAIM.analysisId(),
+                CLAIM.analysisRequestId(),
+                CLAIM.attemptCount(),
+                INPUT.criteriaReference(),
+                INPUT.verificationId(),
+                INPUT.objectKey(),
+                "video/mp4",
+                INPUT.sizeBytes()
+        );
+        when(inputLoader.load(CLAIM)).thenReturn(INPUT).thenReturn(videoInput);
         when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes()))
                 .thenReturn(new VerificationMediaStorage.StoredMedia(
                         INPUT.objectKey(),
@@ -96,29 +107,63 @@ class VerificationAnalysisMediaProcessorTest {
                         INPUT.contentType(),
                         new byte[]{1, 2, 3, 4, 5}
                 ))
-                .thenReturn(MEDIA);
+                .thenReturn(new VerificationMediaStorage.StoredMedia(
+                        videoInput.objectKey(),
+                        videoInput.sizeBytes(),
+                        videoInput.contentType(),
+                        new byte[]{1, 2, 3, 4}
+                ));
 
-        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM, CRITERIA));
-        assertFailure(
-                VerificationAnalysisFailureCode.BAD_REQUEST,
-                processor().process(CLAIM, criteria(VerificationCriteria.MediaModality.PHOTO))
-        );
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
         verify(provider, never()).analyze(any(), any());
     }
 
     @Test
-    void rejectsCriteriaDifferentFromEnqueueProvenance() {
+    void rejectsUnknownExactEnqueueProvenance() {
+        when(inputLoader.load(CLAIM)).thenReturn(new VerificationAnalysisInput(
+                INPUT.analysisId(),
+                INPUT.analysisRequestId(),
+                INPUT.attemptCount(),
+                new VerificationCriteria.Reference("unknown", 1),
+                INPUT.verificationId(),
+                INPUT.objectKey(),
+                INPUT.contentType(),
+                INPUT.sizeBytes()
+        ));
+
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
+        verify(storage, never()).acquire(any(), anyLong());
+        verify(provider, never()).analyze(any(), any());
+    }
+
+    @Test
+    void inputReferenceSelectsExactCatalogVersionWithoutCallerCriteria() {
         when(inputLoader.load(CLAIM)).thenReturn(INPUT);
+        when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes())).thenReturn(MEDIA);
+        when(provider.analyze(any(), any())).thenReturn(PROVIDER_RESULT);
 
-        VerificationCriteria mismatched = new VerificationCriteria(
-                new VerificationCriteria.Reference("OTHER_TEST_EVIDENCE", 1),
-                new RoutineKey("TEST_ROUTINE"),
-                CRITERIA.supportedMedia(),
-                CRITERIA.requiredObservations(),
-                CRITERIA.evidenceRequirements()
-        );
+        VerificationAnalysisMediaProcessor.Observed observed =
+                (VerificationAnalysisMediaProcessor.Observed) processor().process(CLAIM);
 
-        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM, mismatched));
+        assertEquals(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1, observed.criteria().reference());
+        verify(provider).analyze(eq(CRITERIA.providerContract()), any());
+    }
+
+    @Test
+    void noLatestFallbackExistsForUnknownFutureVersion() {
+        when(inputLoader.load(CLAIM)).thenReturn(new VerificationAnalysisInput(
+                INPUT.analysisId(),
+                INPUT.analysisRequestId(),
+                INPUT.attemptCount(),
+                new VerificationCriteria.Reference("meal-photo-record", 2),
+                INPUT.verificationId(),
+                INPUT.objectKey(),
+                INPUT.contentType(),
+                INPUT.sizeBytes()
+        ));
+
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
         verify(storage, never()).acquire(any(), anyLong());
         verify(provider, never()).analyze(any(), any());
     }
@@ -132,7 +177,7 @@ class VerificationAnalysisMediaProcessorTest {
                         "unavailable"
                 ));
 
-        assertFailure(VerificationAnalysisFailureCode.NETWORK, processor().process(CLAIM, CRITERIA));
+        assertFailure(VerificationAnalysisFailureCode.NETWORK, processor().process(CLAIM));
         verify(provider, never()).analyze(any(), any());
     }
 
@@ -153,7 +198,7 @@ class VerificationAnalysisMediaProcessorTest {
 
         assertFailure(
                 VerificationAnalysisFailureCode.INVALID_RESPONSE,
-                processor().process(CLAIM, CRITERIA)
+                processor().process(CLAIM)
         );
     }
 
@@ -176,27 +221,27 @@ class VerificationAnalysisMediaProcessorTest {
 
         assertEquals(missing, assertThrows(
                 VerificationMediaStorage.StorageException.class,
-                () -> processor().process(CLAIM, CRITERIA)
+                () -> processor().process(CLAIM)
         ));
         assertEquals(configuration, assertThrows(
                 VerificationMediaStorage.StorageException.class,
-                () -> processor().process(CLAIM, CRITERIA)
+                () -> processor().process(CLAIM)
         ));
-        assertThrows(IllegalStateException.class, () -> processor().process(CLAIM, CRITERIA));
+        assertThrows(IllegalStateException.class, () -> processor().process(CLAIM));
     }
 
     @Test
     void rejectsExecutionInsideCallerTransaction() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         try {
-            assertThrows(IllegalStateException.class, () -> processor().process(CLAIM, CRITERIA));
+            assertThrows(IllegalStateException.class, () -> processor().process(CLAIM));
         } finally {
             TransactionSynchronizationManager.setActualTransactionActive(false);
         }
     }
 
     private VerificationAnalysisMediaProcessor processor() {
-        return new VerificationAnalysisMediaProcessor(inputLoader, storage, provider);
+        return new VerificationAnalysisMediaProcessor(inputLoader, storage, provider, CATALOG);
     }
 
     private void assertFailure(
@@ -206,21 +251,6 @@ class VerificationAnalysisMediaProcessorTest {
         VerificationAnalysisMediaProcessor.Failure failure =
                 (VerificationAnalysisMediaProcessor.Failure) outcome;
         assertEquals(expected, failure.failureCode());
-    }
-
-    private static VerificationCriteria criteria(VerificationCriteria.MediaModality modality) {
-        return new VerificationCriteria(
-                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                new RoutineKey("TEST_ROUTINE"),
-                Set.of(modality),
-                Set.of(
-                        VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,
-                        VerificationCriteria.ObservationType.CRITERIA_RELEVANCE_SCORE,
-                        VerificationCriteria.ObservationType.INTEGRITY_ANOMALY,
-                        VerificationCriteria.ObservationType.FRAMING_SUFFICIENCY
-                ),
-                "Test-only evidence requirements"
-        );
     }
 
     private static VerificationAnalysisProvider.Result providerResult() {

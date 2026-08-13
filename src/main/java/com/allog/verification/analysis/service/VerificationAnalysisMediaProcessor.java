@@ -5,6 +5,7 @@ import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Objects;
@@ -14,19 +15,21 @@ public final class VerificationAnalysisMediaProcessor {
     private final VerificationAnalysisInputLoader inputLoader;
     private final VerificationMediaStorage storage;
     private final VerificationAnalysisProvider provider;
+    private final VerificationTemplateCatalog catalog;
 
     public VerificationAnalysisMediaProcessor(
             VerificationAnalysisInputLoader inputLoader,
             VerificationMediaStorage storage,
-            VerificationAnalysisProvider provider
+            VerificationAnalysisProvider provider,
+            VerificationTemplateCatalog catalog
     ) {
         this.inputLoader = Objects.requireNonNull(inputLoader);
         this.storage = Objects.requireNonNull(storage);
         this.provider = Objects.requireNonNull(provider);
+        this.catalog = Objects.requireNonNull(catalog);
     }
 
-    public Outcome process(VerificationAnalysisClaim claim, VerificationCriteria criteria) {
-        Objects.requireNonNull(criteria, "criteria must not be null");
+    public Outcome process(VerificationAnalysisClaim claim) {
         requireNoTransaction("input load");
         final VerificationAnalysisInput input;
         try {
@@ -34,7 +37,10 @@ public final class VerificationAnalysisMediaProcessor {
         } catch (VerificationAnalysisInputLoader.LoadException exception) {
             return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
         }
-        if (!input.criteriaReference().equals(criteria.reference())) {
+        final VerificationCriteria criteria;
+        try {
+            criteria = catalog.requireCriteria(input.criteriaReference());
+        } catch (IllegalArgumentException exception) {
             return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
         }
 

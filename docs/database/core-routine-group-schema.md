@@ -88,11 +88,17 @@ UNIQUE group_member(routine_group_id, user_id)
 INDEX group_member(user_id, status)
 INDEX group_member(routine_group_id, participation_started_at)
 UNIQUE routine_definition(routine_key)
+
+CHECK routine_group verification binding is either NULL/NULL or non-NULL/non-NULL
 ```
 
 `routine_definition.routine_key VARCHAR(64) NULL`은 DB ID, display name, description과 분리된 Product identity다.
 애플리케이션은 `[A-Z][A-Z0-9_]{0,63}` canonical 값을 저장하며 setter/update path를 제공하지 않는다. V7은 기존
 row를 추측해 backfill하지 않으므로 여러 legacy `NULL` row를 허용한다.
+
+`routine_group.verification_template_key`와 `verification_criteria_reference`는 V8에서 추가한 nullable pair다.
+AI 인증형 Group은 code-owned Template key와 exact Criteria reference를 함께 저장한다. legacy/기록형 Group은
+`NULL/NULL`을 유지하며 backfill하지 않는다. Code-owned catalog이므로 별도 table이나 FK는 만들지 않는다.
 
 `group_member.participation_started_at TIMESTAMP(6) NULL`은 현재 status와 별개인 공식 참여 이력이다. `IS NOT NULL`인 회원은 이후 LEFT/REMOVED가 되어도 fixed denominator 후보로 남는다. Flyway V3는 기존 row를 추론해 backfill하지 않고 NULL로 둔다.
 

@@ -8,6 +8,7 @@ import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.repository.RoutineScheduleRepository;
 import com.allog.routine.schedule.RoutineScheduleCalculator;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
 import com.allog.verification.domain.Verification;
@@ -16,6 +17,7 @@ import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,7 @@ public class VerificationCommandService {
     private final AnalysisRequestIdGenerator analysisRequestIdGenerator;
     private final VerificationCreator verificationCreator;
     private final VerificationMediaPolicy mediaPolicy;
+    private final VerificationTemplateCatalog verificationTemplateCatalog;
     private final Clock clock;
     private final RoutineScheduleCalculator scheduleCalculator = new RoutineScheduleCalculator();
 
@@ -49,6 +52,7 @@ public class VerificationCommandService {
             AnalysisRequestIdGenerator analysisRequestIdGenerator,
             VerificationCreator verificationCreator,
             VerificationMediaPolicy mediaPolicy,
+            VerificationTemplateCatalog verificationTemplateCatalog,
             Clock clock
     ) {
         this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
@@ -59,6 +63,7 @@ public class VerificationCommandService {
         this.analysisRequestIdGenerator = Objects.requireNonNull(analysisRequestIdGenerator);
         this.verificationCreator = Objects.requireNonNull(verificationCreator);
         this.mediaPolicy = Objects.requireNonNull(mediaPolicy);
+        this.verificationTemplateCatalog = Objects.requireNonNull(verificationTemplateCatalog);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -204,6 +209,8 @@ public class VerificationCommandService {
         if (media.isConfirmed()) {
             throw new IllegalStateException("PENDING_UPLOAD verification cannot have confirmed media");
         }
+        VerificationCriteria criteria = resolveCriteria(verification);
+        requireSupportedMedia(criteria, media.getContentType());
         mediaPolicy.requireInspection(
                 media.getObjectKey(),
                 media.getContentType(),
@@ -214,11 +221,45 @@ public class VerificationCommandService {
         Clock eventClock = Clock.fixed(current.snapshotNow(), clock.getZone());
         media.confirm(inspection.contentLength(), eventClock);
         verification.submit(eventClock);
-        verificationAnalysisRepository.save(VerificationAnalysis.createPending(
-                verification,
-                analysisRequestIdGenerator.generate()
-        ));
+        UUID analysisRequestId = analysisRequestIdGenerator.generate();
+        verificationAnalysisRepository.save(criteria == null
+                ? VerificationAnalysis.createPending(verification, analysisRequestId)
+                : VerificationAnalysis.createPending(verification, analysisRequestId, criteria));
         return verification;
+    }
+
+    private VerificationCriteria resolveCriteria(Verification verification) {
+        var group = verification.getRoutineSchedule().getRoutineGroup();
+        if (!group.hasVerificationBinding()) {
+            return null;
+        }
+        return verificationTemplateCatalog.resolve(
+                group.getVerificationTemplateKey(),
+                group.getVerificationCriteriaReference()
+        );
+    }
+
+    private void requireSupportedMedia(VerificationCriteria criteria, String contentType) {
+        if (criteria == null) {
+            return;
+        }
+        VerificationCriteria.MediaModality modality;
+        if (contentType.startsWith("image/")) {
+            modality = VerificationCriteria.MediaModality.PHOTO;
+        } else if (contentType.startsWith("video/")) {
+            modality = VerificationCriteria.MediaModality.VIDEO;
+        } else {
+            throw new VerificationMediaCommandException(
+                    VerificationMediaCommandException.Reason.UNSUPPORTED_CONTENT_TYPE,
+                    "verification criteria does not support the stored media content type"
+            );
+        }
+        if (!criteria.supportedMedia().contains(modality)) {
+            throw new VerificationMediaCommandException(
+                    VerificationMediaCommandException.Reason.UNSUPPORTED_CONTENT_TYPE,
+                    "verification criteria does not support the stored media content type"
+            );
+        }
     }
 
     private CurrentVerification currentForUpdate(Long groupId, Long currentUserId) {

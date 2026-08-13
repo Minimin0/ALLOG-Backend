@@ -12,12 +12,14 @@ import com.allog.routine.domain.RoutineKey;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,6 +48,9 @@ class CorePersistenceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private VerificationTemplateCatalog verificationTemplateCatalog;
 
     @Test
     void appliesFlywayMigrationBeforeJpaValidation() {
@@ -79,6 +85,45 @@ class CorePersistenceTest {
                 "select count(*) from routine_definition where id = ? and routine_key is null",
                 Integer.class,
                 legacy.getId()
+        ));
+    }
+
+    @Test
+    void v8PersistsExactGroupVerificationBindingAndKeepsLegacyRowsNullable() {
+        Fixture legacy = fixture();
+        RoutineGroup bound = new RoutineGroup(
+                legacy.definition(),
+                legacy.user(),
+                "meal verification",
+                GroupVisibility.PUBLIC,
+                RoutineGroupStatus.DRAFT,
+                5,
+                1,
+                verificationTemplateCatalog.requireTemplate(VerificationTemplateCatalog.MEAL_PHOTO_RECORD)
+        );
+        entityManager.persist(bound);
+        entityManager.flush();
+        entityManager.clear();
+
+        RoutineGroup found = entityManager.find(RoutineGroup.class, bound.getId());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '8' and success = true",
+                Integer.class
+        ));
+        assertEquals(VerificationTemplateCatalog.MEAL_PHOTO_RECORD, found.getVerificationTemplateKey());
+        assertEquals(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1, found.getVerificationCriteriaReference());
+        assertNull(entityManager.find(RoutineGroup.class, legacy.group().getId()).getVerificationTemplateKey());
+    }
+
+    @Test
+    void v8RejectsOneSidedGroupVerificationBinding() {
+        Fixture fixture = fixture();
+        entityManager.flush();
+
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+                "update routine_group set verification_template_key = ? where id = ?",
+                VerificationTemplateCatalog.MEAL_PHOTO_RECORD.value(),
+                fixture.group().getId()
         ));
     }
 

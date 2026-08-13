@@ -1,17 +1,17 @@
 package com.allog.verification.analysis.domain;
 
-import com.allog.routine.domain.RoutineKey;
+import com.allog.verification.template.domain.VerificationTemplateKey;
 
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Backend-owned, provider-neutral criteria bound to one stable Product Routine identity.
+ * Backend-owned, provider-neutral criteria bound to one verification template.
  * Product criteria are code-owned and version changes require a new {@link Reference}.
  */
 public record VerificationCriteria(
         Reference reference,
-        RoutineKey routineKey,
+        VerificationTemplateKey templateKey,
         Set<MediaModality> supportedMedia,
         Set<ObservationType> requiredObservations,
         String evidenceRequirements
@@ -19,7 +19,7 @@ public record VerificationCriteria(
 
     public VerificationCriteria {
         Objects.requireNonNull(reference, "reference must not be null");
-        Objects.requireNonNull(routineKey, "routineKey must not be null");
+        Objects.requireNonNull(templateKey, "templateKey must not be null");
         supportedMedia = requireNonEmptyCopy(supportedMedia, "supportedMedia");
         requiredObservations = requireNonEmptyCopy(requiredObservations, "requiredObservations");
         evidenceRequirements = requireText(evidenceRequirements, "evidenceRequirements");
@@ -71,7 +71,7 @@ public record VerificationCriteria(
         }
     }
 
-    /** Vendor-facing criteria deliberately excludes the internal RoutineKey. */
+    /** Vendor-facing criteria deliberately excludes the internal VerificationTemplateKey. */
     public record ProviderContract(
             Reference reference,
             Set<MediaModality> supportedMedia,

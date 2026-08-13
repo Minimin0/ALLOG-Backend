@@ -3,6 +3,9 @@ package com.allog.group.domain;
 import com.allog.common.persistence.BaseTimeEntity;
 import com.allog.routine.domain.RoutineDefinition;
 import com.allog.user.domain.User;
+import com.allog.verification.analysis.domain.VerificationCriteria;
+import com.allog.verification.template.domain.VerificationTemplate;
+import com.allog.verification.template.domain.VerificationTemplateKey;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -50,6 +53,12 @@ public class RoutineGroup extends BaseTimeEntity {
     @Column(name = "required_completion_count", nullable = false)
     private int requiredCompletionCount;
 
+    @Column(name = "verification_template_key", length = VerificationTemplateKey.MAX_LENGTH)
+    private String verificationTemplateKey;
+
+    @Column(name = "verification_criteria_reference", length = 64)
+    private String verificationCriteriaReference;
+
     protected RoutineGroup() {
     }
 
@@ -69,6 +78,33 @@ public class RoutineGroup extends BaseTimeEntity {
         this.status = Objects.requireNonNull(status, "status must not be null");
         this.maxMembers = requirePositive(maxMembers, "maxMembers");
         this.requiredCompletionCount = requirePositive(requiredCompletionCount, "requiredCompletionCount");
+    }
+
+    public RoutineGroup(
+            RoutineDefinition routineDefinition,
+            User createdBy,
+            String name,
+            GroupVisibility visibility,
+            RoutineGroupStatus status,
+            int maxMembers,
+            int requiredCompletionCount,
+            VerificationTemplate verificationTemplate
+    ) {
+        this(
+                routineDefinition,
+                createdBy,
+                name,
+                visibility,
+                status,
+                maxMembers,
+                requiredCompletionCount
+        );
+        VerificationTemplate template = Objects.requireNonNull(
+                verificationTemplate,
+                "verificationTemplate must not be null"
+        );
+        this.verificationTemplateKey = template.key().value();
+        this.verificationCriteriaReference = template.criteriaReference().storageValue();
     }
 
     public Long getId() {
@@ -101,6 +137,23 @@ public class RoutineGroup extends BaseTimeEntity {
 
     public int getRequiredCompletionCount() {
         return requiredCompletionCount;
+    }
+
+    public boolean hasVerificationBinding() {
+        if ((verificationTemplateKey == null) != (verificationCriteriaReference == null)) {
+            throw new IllegalStateException("verification template key and criteria reference must be set together");
+        }
+        return verificationTemplateKey != null;
+    }
+
+    public VerificationTemplateKey getVerificationTemplateKey() {
+        return hasVerificationBinding() ? new VerificationTemplateKey(verificationTemplateKey) : null;
+    }
+
+    public VerificationCriteria.Reference getVerificationCriteriaReference() {
+        return hasVerificationBinding()
+                ? VerificationCriteria.Reference.fromStorageValue(verificationCriteriaReference)
+                : null;
     }
 
     public boolean canActivate() {

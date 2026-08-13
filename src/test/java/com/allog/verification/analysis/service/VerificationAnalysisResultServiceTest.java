@@ -1,8 +1,6 @@
 package com.allog.verification.analysis.service;
 
 import com.allog.group.domain.RoutineGroup;
-import com.allog.routine.domain.RoutineDefinition;
-import com.allog.routine.domain.RoutineKey;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
@@ -13,6 +11,7 @@ import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
+import com.allog.verification.template.domain.VerificationTemplateKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +42,10 @@ class VerificationAnalysisResultServiceTest {
     private static final Long ANALYSIS_ID = 100L;
     private static final Instant ATTEMPT_STARTED_AT = Instant.parse("2026-08-14T00:00:00Z");
     private static final Instant COMPLETED_AT = Instant.parse("2026-08-14T00:00:30.123456789Z");
-    private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    private static final VerificationTemplateKey TEST_TEMPLATE_KEY =
+            new VerificationTemplateKey("TEST_TEMPLATE");
+    private static final VerificationCriteria.Reference TEST_REFERENCE =
+            new VerificationCriteria.Reference("TEST_EVIDENCE", 1);
 
     @Mock
     private VerificationAnalysisRepository repository;
@@ -216,18 +218,16 @@ class VerificationAnalysisResultServiceTest {
         when(verification.getStatus()).thenReturn(VerificationStatus.SUBMITTED);
         when(verification.getRoutineSchedule()).thenReturn(schedule);
         when(schedule.getRoutineGroup()).thenReturn(group);
-        when(group.getRoutineDefinition()).thenReturn(new RoutineDefinition(
-                TEST_ROUTINE_KEY,
-                "test routine",
-                null
-        ));
+        when(group.hasVerificationBinding()).thenReturn(true);
+        when(group.getVerificationTemplateKey()).thenReturn(TEST_TEMPLATE_KEY);
+        when(group.getVerificationCriteriaReference()).thenReturn(TEST_REFERENCE);
         return VerificationAnalysis.createPending(verification, requestId, criteria());
     }
 
     private VerificationCriteria criteria() {
         return new VerificationCriteria(
-                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                TEST_ROUTINE_KEY,
+                TEST_REFERENCE,
+                TEST_TEMPLATE_KEY,
                 java.util.Set.of(VerificationCriteria.MediaModality.VIDEO),
                 java.util.Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                 "Test-only evidence requirements"

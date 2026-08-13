@@ -122,16 +122,15 @@ public class VerificationAnalysis extends BaseTimeEntity {
             VerificationCriteria criteria
     ) {
         Objects.requireNonNull(criteria, "criteria must not be null");
-        var routineDefinition = Objects.requireNonNull(verification, "verification must not be null")
+        var group = Objects.requireNonNull(verification, "verification must not be null")
                 .getRoutineSchedule()
-                .getRoutineGroup()
-                .getRoutineDefinition();
-        var routineKey = routineDefinition.getRoutineKey();
-        if (routineKey == null) {
-            throw new IllegalStateException("criteria binding requires a stable routine key");
+                .getRoutineGroup();
+        if (!group.hasVerificationBinding()) {
+            throw new IllegalStateException("criteria-aware analysis requires a group verification binding");
         }
-        if (!routineKey.equals(criteria.routineKey())) {
-            throw new IllegalArgumentException("criteria is not bound to the verification routine");
+        if (!group.getVerificationTemplateKey().equals(criteria.templateKey())
+                || !group.getVerificationCriteriaReference().equals(criteria.reference())) {
+            throw new IllegalArgumentException("criteria is not the exact reference pinned by the verification group");
         }
         return new VerificationAnalysis(verification, analysisRequestId, criteria.reference().storageValue());
     }

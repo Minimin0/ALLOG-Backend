@@ -19,6 +19,7 @@ import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
 import com.allog.verification.storage.VerificationMediaStorage;
+import com.allog.verification.template.VerificationTemplateCatalog;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -119,6 +120,9 @@ class VerificationCommandIntegrationTest {
     @Autowired
     private MutableAnalysisRequestIdGenerator analysisRequestIdGenerator;
 
+    @Autowired
+    private VerificationTemplateCatalog verificationTemplateCatalog;
+
     @BeforeEach
     void resetMediaBoundary() {
         clock.set(SNAPSHOT_NOW);
@@ -189,14 +193,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV7() {
+    void flywayHasExactlyV1ThroughV8() {
         assertAll(
-                () -> assertEquals(7, jdbcTemplate.queryForObject(
+                () -> assertEquals(8, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '7'",
+                        "select count(*) from flyway_schema_history where version = '8'",
                         Integer.class
                 ))
         );
@@ -332,9 +336,107 @@ class VerificationCommandIntegrationTest {
                         .findByVerification_Id(submitted.verificationId())
                         .orElseThrow()
                         .getStatus()),
+                () -> assertNull(verificationAnalysisRepository
+                        .findByVerification_Id(submitted.verificationId())
+                        .orElseThrow()
+                        .getCriteriaVersion()),
                 () -> assertFalse(mediaStorage.issueTransactionActive()),
                 () -> assertFalse(mediaStorage.inspectTransactionActive())
         );
+    }
+
+    @Test
+    void pilotBoundSubmitPinsExactV1ProvenanceAndIsIdempotent() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+
+        VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+        VerificationSubmissionResult duplicate = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+
+        assertAll(
+                () -> assertEquals(VerificationStatus.SUBMITTED, first.status()),
+                () -> assertEquals(first.verificationId(), duplicate.verificationId()),
+                () -> assertEquals(1, analysisRows(first.verificationId())),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        verificationAnalysisRepository.findByVerification_Id(first.verificationId())
+                                .orElseThrow()
+                                .getCriteriaVersion()
+                )
+        );
+    }
+
+    @Test
+    void concurrentPilotBoundSubmitCreatesOneAnalysisWithOneExactProvenance() throws Exception {
+        Fixture fixture = fixture(true);
+        service.createOrGetCurrent(fixture.groupId(), fixture.userId());
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+
+        List<Instant> submittedAt = concurrently(() -> mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        ).submittedAt());
+        Verification verification = currentVerification(fixture);
+
+        assertAll(
+                () -> assertEquals(submittedAt.get(0), submittedAt.get(1)),
+                () -> assertEquals(1, analysisRows(verification.getId())),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        verificationAnalysisRepository.findByVerification_Id(verification.getId())
+                                .orElseThrow()
+                                .getCriteriaVersion()
+                )
+        );
+    }
+
+    @Test
+    void pilotBoundSubmitRejectsVideoBeforeConfirmation() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "video/mp4", 100);
+
+        VerificationMediaCommandException exception = assertThrows(
+                VerificationMediaCommandException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+
+        assertEquals(VerificationMediaCommandException.Reason.UNSUPPORTED_CONTENT_TYPE, exception.reason());
+        assertPendingUnconfirmed(fixture);
+    }
+
+    @Test
+    void unknownTemplateRollsBackSubmissionAtomically() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        jdbcTemplate.update(
+                "update routine_group set verification_template_key = 'UNKNOWN_TEMPLATE' where id = ?",
+                fixture.groupId()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+        assertPendingUnconfirmed(fixture);
+    }
+
+    @Test
+    void templateCriteriaMismatchRollsBackSubmissionAtomically() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        jdbcTemplate.update(
+                "update routine_group set verification_criteria_reference = 'other-criteria@1' where id = ?",
+                fixture.groupId()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+        assertPendingUnconfirmed(fixture);
     }
 
     @Test
@@ -534,20 +636,37 @@ class VerificationCommandIntegrationTest {
     }
 
     private Fixture fixture() {
+        return fixture(false);
+    }
+
+    private Fixture fixture(boolean verificationBound) {
         return inTransaction(() -> {
             User user = User.create();
             RoutineDefinition definition = new RoutineDefinition("water", null);
             entityManager.persist(user);
             entityManager.persist(definition);
-            RoutineGroup group = new RoutineGroup(
-                    definition,
-                    user,
-                    "water group",
-                    GroupVisibility.PUBLIC,
-                    RoutineGroupStatus.ACTIVE,
-                    5,
-                    1
-            );
+            RoutineGroup group = verificationBound
+                    ? new RoutineGroup(
+                            definition,
+                            user,
+                            "water group",
+                            GroupVisibility.PUBLIC,
+                            RoutineGroupStatus.ACTIVE,
+                            5,
+                            1,
+                            verificationTemplateCatalog.requireTemplate(
+                                    VerificationTemplateCatalog.MEAL_PHOTO_RECORD
+                            )
+                    )
+                    : new RoutineGroup(
+                            definition,
+                            user,
+                            "water group",
+                            GroupVisibility.PUBLIC,
+                            RoutineGroupStatus.ACTIVE,
+                            5,
+                            1
+                    );
             entityManager.persist(group);
             RoutineSchedule schedule = new RoutineSchedule(
                     group,
@@ -594,6 +713,20 @@ class VerificationCommandIntegrationTest {
                 "select count(*) from verification_analysis where verification_id = ?",
                 Integer.class,
                 verificationId
+        );
+    }
+
+    private void assertPendingUnconfirmed(Fixture fixture) {
+        Verification verification = currentVerification(fixture);
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(verification.getId())
+                .orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.PENDING_UPLOAD, verification.getStatus()),
+                () -> assertNull(verification.getSubmittedAt()),
+                () -> assertNull(media.getConfirmedAt()),
+                () -> assertNull(media.getConfirmedSizeBytes()),
+                () -> assertEquals(0, analysisRows(verification.getId()))
         );
     }
 
