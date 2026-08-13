@@ -146,6 +146,44 @@ public class VerificationAnalysis extends BaseTimeEntity {
                 && !lastAttemptAt.isAfter(staleAtOrBefore);
     }
 
+    public void succeed(
+            AnalysisRecommendation recommendation,
+            String reasonCode,
+            String providerModel,
+            String criteriaVersion,
+            Boolean objectPresence,
+            BigDecimal relevanceScore,
+            Boolean anomalyDetected,
+            Boolean framedProperly,
+            Instant completedAt
+    ) {
+        requireProcessingCompletion(completedAt);
+        AnalysisRecommendation requiredRecommendation = Objects.requireNonNull(
+                recommendation,
+                "recommendation must not be null"
+        );
+        requireRelevanceScore(relevanceScore);
+        this.status = VerificationAnalysisStatus.SUCCEEDED;
+        this.recommendation = requiredRecommendation;
+        this.reasonCode = reasonCode;
+        this.providerModel = providerModel;
+        this.criteriaVersion = criteriaVersion;
+        this.objectPresence = objectPresence;
+        this.relevanceScore = relevanceScore;
+        this.anomalyDetected = anomalyDetected;
+        this.framedProperly = framedProperly;
+        this.failureCode = null;
+        this.completedAt = completedAt;
+    }
+
+    public void fail(VerificationAnalysisFailureCode failureCode, Instant completedAt) {
+        requireProcessingCompletion(completedAt);
+        this.failureCode = Objects.requireNonNull(failureCode, "failureCode must not be null");
+        this.status = VerificationAnalysisStatus.FAILED;
+        this.recommendation = null;
+        this.completedAt = completedAt;
+    }
+
     public Long getId() {
         return id;
     }
@@ -208,5 +246,21 @@ public class VerificationAnalysis extends BaseTimeEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    private void requireProcessingCompletion(Instant completionTime) {
+        if (status != VerificationAnalysisStatus.PROCESSING || attemptCount <= 0 || lastAttemptAt == null) {
+            throw new IllegalStateException("only an active PROCESSING attempt can complete");
+        }
+        Objects.requireNonNull(completionTime, "completedAt must not be null");
+        if (completionTime.isBefore(lastAttemptAt)) {
+            throw new IllegalStateException("completedAt must not be before lastAttemptAt");
+        }
+    }
+
+    private void requireRelevanceScore(BigDecimal score) {
+        if (score != null && (score.signum() < 0 || score.compareTo(BigDecimal.ONE) > 0)) {
+            throw new IllegalArgumentException("relevanceScore must be between 0 and 1");
+        }
     }
 }

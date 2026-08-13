@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -77,8 +76,7 @@ public class VerificationAnalysisClaimService {
     }
 
     private Instant snapshotNow() {
-        return Objects.requireNonNull(clock.instant(), "clock instant must not be null")
-                .truncatedTo(ChronoUnit.MICROS);
+        return VerificationAnalysisTime.snapshot(clock);
     }
 
     private Duration requirePositive(Duration value) {

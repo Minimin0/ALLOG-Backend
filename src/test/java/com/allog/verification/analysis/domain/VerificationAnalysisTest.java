@@ -4,6 +4,7 @@ import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -138,6 +139,166 @@ class VerificationAnalysisTest {
 
         analysis.startProcessing(FIRST_ATTEMPT.plus(Duration.ofMinutes(5)));
         assertEquals(2, analysis.getAttemptCount());
+    }
+
+    @Test
+    void succeedsActiveAttemptWithTerminalInvariant() {
+        VerificationAnalysis analysis = processingAnalysis();
+        Instant completedAt = FIRST_ATTEMPT.plusSeconds(30);
+
+        analysis.succeed(
+                AnalysisRecommendation.REVIEW_REQUIRED,
+                "synthetic-reason",
+                "synthetic-model",
+                "synthetic-criteria",
+                true,
+                new BigDecimal("0.7500"),
+                false,
+                true,
+                completedAt
+        );
+
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
+                () -> assertEquals("synthetic-reason", analysis.getReasonCode()),
+                () -> assertEquals("synthetic-model", analysis.getProviderModel()),
+                () -> assertEquals("synthetic-criteria", analysis.getCriteriaVersion()),
+                () -> assertEquals(true, analysis.getObjectPresence()),
+                () -> assertEquals(new BigDecimal("0.7500"), analysis.getRelevanceScore()),
+                () -> assertEquals(false, analysis.getAnomalyDetected()),
+                () -> assertEquals(true, analysis.getFramedProperly()),
+                () -> assertNull(analysis.getFailureCode()),
+                () -> assertEquals(completedAt, analysis.getCompletedAt()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(FIRST_ATTEMPT, analysis.getLastAttemptAt())
+        );
+    }
+
+    @Test
+    void failsActiveAttemptWithTerminalInvariant() {
+        VerificationAnalysis analysis = processingAnalysis();
+        Instant completedAt = FIRST_ATTEMPT.plusSeconds(30);
+
+        analysis.fail(VerificationAnalysisFailureCode.TIMEOUT, completedAt);
+
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.FAILED, analysis.getStatus()),
+                () -> assertEquals(VerificationAnalysisFailureCode.TIMEOUT, analysis.getFailureCode()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals(completedAt, analysis.getCompletedAt()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(FIRST_ATTEMPT, analysis.getLastAttemptAt())
+        );
+    }
+
+    @Test
+    void rejectsInvalidCompletionWithoutPartialMutation() {
+        VerificationAnalysis pending = VerificationAnalysis.createPending(
+                verification(VerificationStatus.SUBMITTED),
+                UUID.randomUUID()
+        );
+        assertAll(
+                () -> assertThrows(IllegalStateException.class, () -> pending.succeed(
+                        AnalysisRecommendation.PASS, null, null, null, null, null, null, null, FIRST_ATTEMPT
+                )),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> pending.fail(VerificationAnalysisFailureCode.TIMEOUT, FIRST_ATTEMPT)
+                )
+        );
+
+        VerificationAnalysis processing = processingAnalysis();
+        assertAll(
+                () -> assertThrows(NullPointerException.class, () -> processing.succeed(
+                        null, null, null, null, null, null, null, null, FIRST_ATTEMPT
+                )),
+                () -> assertThrows(IllegalArgumentException.class, () -> processing.succeed(
+                        AnalysisRecommendation.PASS,
+                        null,
+                        null,
+                        null,
+                        null,
+                        new BigDecimal("1.0001"),
+                        null,
+                        null,
+                        FIRST_ATTEMPT
+                )),
+                () -> assertThrows(
+                        NullPointerException.class,
+                        () -> processing.fail(null, FIRST_ATTEMPT)
+                ),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> processing.fail(VerificationAnalysisFailureCode.TIMEOUT, FIRST_ATTEMPT.minusNanos(1))
+                ),
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, processing.getStatus()),
+                () -> assertNull(processing.getRecommendation()),
+                () -> assertNull(processing.getFailureCode()),
+                () -> assertNull(processing.getCompletedAt())
+        );
+    }
+
+    @Test
+    void terminalAnalysisCannotBeCompletedAgain() {
+        VerificationAnalysis succeeded = processingAnalysis();
+        succeeded.succeed(
+                AnalysisRecommendation.PASS,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                FIRST_ATTEMPT
+        );
+        assertAll(
+                () -> assertThrows(IllegalStateException.class, () -> succeeded.succeed(
+                        AnalysisRecommendation.REVIEW_REQUIRED,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        FIRST_ATTEMPT.plusSeconds(1)
+                )),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> succeeded.fail(VerificationAnalysisFailureCode.TIMEOUT, FIRST_ATTEMPT.plusSeconds(1))
+                )
+        );
+
+        VerificationAnalysis failed = processingAnalysis();
+        failed.fail(VerificationAnalysisFailureCode.TIMEOUT, FIRST_ATTEMPT);
+        assertAll(
+                () -> assertThrows(IllegalStateException.class, () -> failed.succeed(
+                        AnalysisRecommendation.PASS,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        FIRST_ATTEMPT.plusSeconds(1)
+                )),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> failed.fail(VerificationAnalysisFailureCode.NETWORK, FIRST_ATTEMPT.plusSeconds(1))
+                )
+        );
+    }
+
+    private VerificationAnalysis processingAnalysis() {
+        VerificationAnalysis analysis = VerificationAnalysis.createPending(
+                verification(VerificationStatus.SUBMITTED),
+                UUID.randomUUID()
+        );
+        analysis.startProcessing(FIRST_ATTEMPT);
+        return analysis;
     }
 
     private Verification verification(VerificationStatus status) {

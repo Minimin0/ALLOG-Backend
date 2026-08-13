@@ -10,13 +10,18 @@ import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
+import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.VerificationAnalysisClaim;
 import com.allog.verification.analysis.service.VerificationAnalysisClaimService;
+import com.allog.verification.analysis.service.VerificationAnalysisResultService;
+import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult;
 import com.allog.verification.domain.Verification;
 import jakarta.persistence.EntityManager;
+import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -82,6 +87,9 @@ class VerificationAnalysisPersistenceTest {
 
     @Autowired
     private VerificationAnalysisClaimService claimService;
+
+    @Autowired
+    private VerificationAnalysisResultService resultService;
 
     @Autowired
     private MutableClock clock;
@@ -445,6 +453,253 @@ class VerificationAnalysisPersistenceTest {
         );
     }
 
+    @Test
+    void persistsSuccessfulResultWithOneLockSelectAndOneUpdate() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30).plusNanos(789));
+        clock.resetReads();
+        SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
+        var statistics = sessionFactory.getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+
+        boolean applied;
+        long statements;
+        try {
+            applied = resultService.completeSuccess(claim, successResult(AnalysisRecommendation.REVIEW_REQUIRED));
+            statements = statistics.getPrepareStatementCount();
+        } finally {
+            statistics.setStatisticsEnabled(false);
+        }
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertTrue(applied),
+                () -> assertEquals(2, statements),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
+                () -> assertEquals("synthetic-reason", analysis.getReasonCode()),
+                () -> assertEquals("synthetic-model", analysis.getProviderModel()),
+                () -> assertEquals("synthetic-criteria", analysis.getCriteriaVersion()),
+                () -> assertEquals(true, analysis.getObjectPresence()),
+                () -> assertEquals(new BigDecimal("0.7500"), analysis.getRelevanceScore()),
+                () -> assertEquals(false, analysis.getAnomalyDetected()),
+                () -> assertEquals(true, analysis.getFramedProperly()),
+                () -> assertNull(analysis.getFailureCode()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(30), analysis.getCompletedAt()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt()),
+                () -> assertEquals(1, clock.reads()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void persistsFailedResultWithoutChangingAttemptMetadata() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        clock.resetReads();
+
+        assertTrue(resultService.completeFailure(claim, VerificationAnalysisFailureCode.TIMEOUT));
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.FAILED, analysis.getStatus()),
+                () -> assertEquals(VerificationAnalysisFailureCode.TIMEOUT, analysis.getFailureCode()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(30), analysis.getCompletedAt()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt()),
+                () -> assertEquals(1, clock.reads()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void recoveryAndReclaimFenceLateSuccessThenAcceptCurrentSuccess() {
+        VerificationAnalysisClaim oldClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        VerificationAnalysisClaim currentClaim = claimService.claimNextPending().orElseThrow();
+        clock.set(WORKER_NOW.plusSeconds(330));
+        clock.resetReads();
+
+        assertFalse(resultService.completeSuccess(oldClaim, successResult(AnalysisRecommendation.PASS)));
+        VerificationAnalysis stillProcessing = repository.findById(currentClaim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, stillProcessing.getStatus()),
+                () -> assertEquals(2, stillProcessing.getAttemptCount()),
+                () -> assertNull(stillProcessing.getRecommendation()),
+                () -> assertNull(stillProcessing.getCompletedAt()),
+                () -> assertEquals(0, clock.reads())
+        );
+
+        assertTrue(resultService.completeSuccess(
+                currentClaim,
+                successResult(AnalysisRecommendation.REVIEW_REQUIRED)
+        ));
+        VerificationAnalysis succeeded = repository.findById(currentClaim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, succeeded.getStatus()),
+                () -> assertEquals(2, succeeded.getAttemptCount()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, succeeded.getRecommendation()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(330), succeeded.getCompletedAt()),
+                () -> assertEquals(1, clock.reads())
+        );
+    }
+
+    @Test
+    void staleFailureCannotDamageCurrentAttempt() {
+        VerificationAnalysisClaim oldClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        VerificationAnalysisClaim currentClaim = claimService.claimNextPending().orElseThrow();
+        clock.set(WORKER_NOW.plusSeconds(330));
+        clock.resetReads();
+
+        assertFalse(resultService.completeFailure(oldClaim, VerificationAnalysisFailureCode.TIMEOUT));
+
+        VerificationAnalysis analysis = repository.findById(currentClaim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, analysis.getStatus()),
+                () -> assertEquals(2, analysis.getAttemptCount()),
+                () -> assertNull(analysis.getFailureCode()),
+                () -> assertNull(analysis.getCompletedAt()),
+                () -> assertEquals(0, clock.reads())
+        );
+    }
+
+    @Test
+    void pendingTerminalDuplicateAndCrossAnalysisResultsAreRejected() {
+        VerificationAnalysisClaim first = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        assertTrue(resultService.completeSuccess(first, successResult(AnalysisRecommendation.PASS)));
+        clock.resetReads();
+        assertAll(
+                () -> assertFalse(resultService.completeSuccess(first, successResult(AnalysisRecommendation.PASS))),
+                () -> assertFalse(resultService.completeFailure(first, VerificationAnalysisFailureCode.NETWORK)),
+                () -> assertEquals(0, clock.reads())
+        );
+
+        VerificationAnalysisClaim failed = claimPendingAnalysis();
+        assertTrue(resultService.completeFailure(failed, VerificationAnalysisFailureCode.TIMEOUT));
+        clock.resetReads();
+        assertAll(
+                () -> assertFalse(resultService.completeSuccess(
+                        failed,
+                        successResult(AnalysisRecommendation.REVIEW_REQUIRED)
+                )),
+                () -> assertFalse(resultService.completeFailure(failed, VerificationAnalysisFailureCode.NETWORK)),
+                () -> assertEquals(0, clock.reads())
+        );
+
+        Long pendingId = pendingAnalysisId();
+        VerificationAnalysis pending = repository.findById(pendingId).orElseThrow();
+        VerificationAnalysisClaim pendingToken = new VerificationAnalysisClaim(
+                pendingId,
+                pending.getAnalysisRequestId(),
+                1
+        );
+        assertFalse(resultService.completeSuccess(
+                pendingToken,
+                successResult(AnalysisRecommendation.PASS)
+        ));
+
+        VerificationAnalysisClaim current = claimService.claimNextPending().orElseThrow();
+        VerificationAnalysisClaim mixed = new VerificationAnalysisClaim(
+                current.analysisId(),
+                first.analysisRequestId(),
+                current.attemptCount()
+        );
+        assertFalse(resultService.completeFailure(mixed, VerificationAnalysisFailureCode.TIMEOUT));
+        assertEquals(
+                VerificationAnalysisStatus.PROCESSING,
+                repository.findById(current.analysisId()).orElseThrow().getStatus()
+        );
+    }
+
+    @Test
+    void successAndFailureCompletionRollBackWithoutPartialTerminalState() {
+        VerificationAnalysisClaim success = claimPendingAnalysis();
+        assertThrows(TestRollback.class, () -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            assertTrue(resultService.completeSuccess(success, successResult(AnalysisRecommendation.PASS)));
+            throw new TestRollback();
+        }));
+        VerificationAnalysis successRolledBack = repository.findById(success.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, successRolledBack.getStatus()),
+                () -> assertNull(successRolledBack.getRecommendation()),
+                () -> assertNull(successRolledBack.getCompletedAt())
+        );
+
+        VerificationAnalysisClaim failure = claimPendingAnalysis();
+        assertThrows(TestRollback.class, () -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            assertTrue(resultService.completeFailure(failure, VerificationAnalysisFailureCode.TIMEOUT));
+            throw new TestRollback();
+        }));
+        VerificationAnalysis failureRolledBack = repository.findById(failure.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, failureRolledBack.getStatus()),
+                () -> assertNull(failureRolledBack.getFailureCode()),
+                () -> assertNull(failureRolledBack.getCompletedAt())
+        );
+    }
+
+    @Test
+    void concurrentSameAttemptCompletionCommitsExactlyOneTerminalResult() throws Exception {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        List<Boolean> results = concurrently(
+                () -> resultService.completeSuccess(claim, successResult(AnalysisRecommendation.PASS)),
+                () -> resultService.completeFailure(claim, VerificationAnalysisFailureCode.TIMEOUT)
+        );
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(1, results.stream().filter(Boolean::booleanValue).count()),
+                () -> assertTrue(Set.of(
+                        VerificationAnalysisStatus.SUCCEEDED,
+                        VerificationAnalysisStatus.FAILED
+                ).contains(analysis.getStatus())),
+                () -> assertEquals(
+                        analysis.getStatus() == VerificationAnalysisStatus.SUCCEEDED,
+                        analysis.getRecommendation() != null
+                ),
+                () -> assertEquals(
+                        analysis.getStatus() == VerificationAnalysisStatus.FAILED,
+                        analysis.getFailureCode() != null
+                ),
+                () -> assertNotNull(analysis.getCompletedAt())
+        );
+    }
+
+    @Test
+    void concurrentOldAndCurrentAttemptCompletionAcceptsOnlyCurrentResult() throws Exception {
+        VerificationAnalysisClaim oldClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        VerificationAnalysisClaim currentClaim = claimService.claimNextPending().orElseThrow();
+        clock.set(WORKER_NOW.plusSeconds(330));
+
+        List<Boolean> results = concurrently(
+                () -> resultService.completeSuccess(oldClaim, successResult(AnalysisRecommendation.PASS)),
+                () -> resultService.completeSuccess(
+                        currentClaim,
+                        successResult(AnalysisRecommendation.REVIEW_REQUIRED)
+                )
+        );
+
+        VerificationAnalysis analysis = repository.findById(currentClaim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(List.of(false, true), results),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(2, analysis.getAttemptCount()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(330), analysis.getCompletedAt())
+        );
+    }
+
     private Long submittedVerificationId() {
         return inTransaction(() -> persistSubmittedVerification().getId());
     }
@@ -456,6 +711,26 @@ class VerificationAnalysisPersistenceTest {
             repository.saveAndFlush(analysis);
             return analysis.getId();
         });
+    }
+
+    private VerificationAnalysisClaim claimPendingAnalysis() {
+        Long analysisId = pendingAnalysisId();
+        return claimService.claimNextPending()
+                .filter(claim -> claim.analysisId().equals(analysisId))
+                .orElseThrow();
+    }
+
+    private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {
+        return new VerificationAnalysisSuccessResult(
+                recommendation,
+                "synthetic-reason",
+                "synthetic-model",
+                "synthetic-criteria",
+                true,
+                new BigDecimal("0.7500"),
+                false,
+                true
+        );
     }
 
     private String analysisStatus(Long verificationId) {
@@ -554,6 +829,23 @@ class VerificationAnalysisPersistenceTest {
         try {
             Future<T> first = executor.submit(() -> runWhenReleased(command, ready, start));
             Future<T> second = executor.submit(() -> runWhenReleased(command, ready, start));
+            if (!ready.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("concurrent workers did not become ready");
+            }
+            start.countDown();
+            return List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private <T> List<T> concurrently(Supplier<T> firstCommand, Supplier<T> secondCommand) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<T> first = executor.submit(() -> runWhenReleased(firstCommand, ready, start));
+            Future<T> second = executor.submit(() -> runWhenReleased(secondCommand, ready, start));
             if (!ready.await(5, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("concurrent workers did not become ready");
             }
