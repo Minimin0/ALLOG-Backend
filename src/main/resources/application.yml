@@ -24,3 +24,11 @@ allog:
     firebase:
       enabled: "${FIREBASE_AUTH_ENABLED:false}"
       project-id: "${FIREBASE_PROJECT_ID:}"
+  verification:
+    media:
+      enabled: "${VERIFICATION_MEDIA_ENABLED:false}"
+      region: "${AWS_REGION:}"
+      bucket: "${VERIFICATION_MEDIA_BUCKET:}"
+      max-bytes: "${VERIFICATION_MEDIA_MAX_BYTES:0}"
+      upload-expiry: "${VERIFICATION_MEDIA_UPLOAD_EXPIRY:0s}"
+      allowed-content-types: "${VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES:}"

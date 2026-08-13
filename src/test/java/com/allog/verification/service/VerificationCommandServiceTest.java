@@ -13,8 +13,11 @@ import com.allog.routine.domain.ScheduleType;
 import com.allog.routine.repository.RoutineScheduleRepository;
 import com.allog.user.domain.User;
 import com.allog.verification.domain.Verification;
+import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
+import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
+import com.allog.verification.storage.VerificationMediaStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,6 +53,8 @@ class VerificationCommandServiceTest {
     private static final Long USER_ID = 20L;
     private static final Instant BEFORE_DEADLINE = Instant.parse("2026-08-11T13:59:59.999999999Z");
     private static final Instant DEADLINE = Instant.parse("2026-08-11T14:00:00Z");
+    private static final VerificationMediaStorage.StoredMediaInspection INSPECTION =
+            new VerificationMediaStorage.StoredMediaInspection("verification-media/test", 10, "video/mp4");
 
     @Mock
     private GroupMemberRepository groupMemberRepository;
@@ -58,7 +63,11 @@ class VerificationCommandServiceTest {
     @Mock
     private VerificationRepository verificationRepository;
     @Mock
+    private VerificationMediaRepository verificationMediaRepository;
+    @Mock
     private VerificationCreator verificationCreator;
+    @Mock
+    private VerificationMediaPolicy mediaPolicy;
 
     private CountingClock clock;
 
@@ -172,7 +181,7 @@ class VerificationCommandServiceTest {
         );
         stubSubmit(fixture, pending);
 
-        Verification result = service().submitCurrent(GROUP_ID, USER_ID);
+        Verification result = service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION);
 
         assertAll(
                 () -> assertEquals(VerificationStatus.SUBMITTED, result.getStatus()),
@@ -193,7 +202,7 @@ class VerificationCommandServiceTest {
 
         assertThrows(
                 VerificationCommandConflictException.class,
-                () -> service().submitCurrent(GROUP_ID, USER_ID)
+                () -> service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION)
         );
         assertEquals(VerificationStatus.PENDING_UPLOAD, pending.getStatus());
     }
@@ -214,7 +223,7 @@ class VerificationCommandServiceTest {
 
         assertThrows(
                 VerificationCommandConflictException.class,
-                () -> service().submitCurrent(GROUP_ID, USER_ID)
+                () -> service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION)
         );
     }
 
@@ -239,7 +248,7 @@ class VerificationCommandServiceTest {
         Instant firstSubmittedAt = verification.getSubmittedAt();
         stubSubmit(fixture, verification);
 
-        Verification result = service().submitCurrent(GROUP_ID, USER_ID);
+        Verification result = service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION);
 
         assertAll(
                 () -> assertSame(verification, result),
@@ -256,7 +265,7 @@ class VerificationCommandServiceTest {
 
         assertThrows(
                 VerificationCommandConflictException.class,
-                () -> service().submitCurrent(GROUP_ID, USER_ID)
+                () -> service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION)
         );
     }
 
@@ -320,11 +329,16 @@ class VerificationCommandServiceTest {
         );
         stubSubmit(fixture, pending);
 
-        service().submitCurrent(GROUP_ID, USER_ID);
+        service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION);
 
-        var order = org.mockito.Mockito.inOrder(groupMemberRepository, verificationRepository);
+        var order = org.mockito.Mockito.inOrder(
+                groupMemberRepository,
+                verificationRepository,
+                verificationMediaRepository
+        );
         order.verify(groupMemberRepository).findByRoutineGroup_IdAndUser_IdForUpdate(GROUP_ID, USER_ID);
         order.verify(verificationRepository).findCurrentForUpdate(null, null, LocalDate.of(2026, 8, 11));
+        order.verify(verificationMediaRepository).findByVerificationIdForUpdate(null);
     }
 
     private VerificationCommandService service() {
@@ -332,7 +346,9 @@ class VerificationCommandServiceTest {
                 groupMemberRepository,
                 routineScheduleRepository,
                 verificationRepository,
+                verificationMediaRepository,
                 verificationCreator,
+                mediaPolicy,
                 clock
         );
     }
@@ -348,6 +364,17 @@ class VerificationCommandServiceTest {
         stubActive(fixture);
         when(verificationRepository.findCurrentForUpdate(null, null, LocalDate.of(2026, 8, 11)))
                 .thenReturn(Optional.of(verification));
+        VerificationMedia media = VerificationMedia.create(
+                verification,
+                INSPECTION.objectKey(),
+                INSPECTION.contentType(),
+                INSPECTION.contentLength()
+        );
+        if (verification.getStatus() != VerificationStatus.PENDING_UPLOAD) {
+            media.confirm(INSPECTION.contentLength(), Clock.fixed(BEFORE_DEADLINE, ZoneOffset.UTC));
+        }
+        when(verificationMediaRepository.findByVerificationIdForUpdate(verification.getId()))
+                .thenReturn(Optional.of(media));
     }
 
     private Verification verification(Fixture fixture, VerificationStatus status) {

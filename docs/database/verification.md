@@ -75,12 +75,13 @@ UNIQUE(group_member_id, routine_schedule_id, scheduled_date)
 
 ## Media와 판정
 
-이번 단계에는 다음을 포함하지 않는다.
+`VerificationMedia`는 Verification당 하나의 private storage object를 binding한다. 자세한 storage와 제출 경계는 [Verification Media Storage](verification-media.md)를 따른다.
 
-- VerificationMedia
-- S3/Presigned URL
-- Vision AI
+다음은 아직 포함하지 않는다.
+
+- 실제 binary type 검사와 Vision/Video AI
+- VerificationAttempt와 사용자 retry
 - 운영자 Review API
-- Progress 재계산
+- Progress 재계산 trigger
 
-향후 `VerificationMedia`와 `VerificationAttempt`는 Verification Aggregate를 참조하도록 확장한다. `INVALIDATED` 발생 시 Progress/Ranking/Reward 재계산 트리거도 별도 단계에서 구현한다.
+향후 `VerificationAttempt`는 Verification Aggregate를 참조하도록 확장한다. `INVALIDATED` 발생 시 Progress/Ranking/Reward 재계산 trigger도 별도 단계에서 구현한다.
