@@ -34,6 +34,9 @@ public final class VerificationAnalysisMediaProcessor {
         } catch (VerificationAnalysisInputLoader.LoadException exception) {
             return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
         }
+        if (!input.criteriaReference().equals(criteria.reference())) {
+            return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
+        }
 
         requireNoTransaction("media acquisition");
         final VerificationMediaStorage.StoredMedia media;

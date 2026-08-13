@@ -2,6 +2,7 @@ package com.allog.verification.analysis.service;
 
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
@@ -50,6 +51,15 @@ public class VerificationAnalysisInputLoader {
         if (verification.getStatus() != VerificationStatus.SUBMITTED) {
             throw failure(Reason.INVALID_VERIFICATION);
         }
+        if (analysis.getCriteriaVersion() == null) {
+            throw failure(Reason.MISSING_CRITERIA);
+        }
+        final VerificationCriteria.Reference criteriaReference;
+        try {
+            criteriaReference = VerificationCriteria.Reference.fromStorageValue(analysis.getCriteriaVersion());
+        } catch (IllegalArgumentException exception) {
+            throw failure(Reason.INVALID_CRITERIA);
+        }
         VerificationMedia media = mediaRepository.findByVerification_Id(verification.getId())
                 .orElseThrow(() -> failure(Reason.MISSING_MEDIA));
         if (!media.isConfirmed()) {
@@ -78,6 +88,7 @@ public class VerificationAnalysisInputLoader {
                     analysis.getId(),
                     analysis.getAnalysisRequestId(),
                     analysis.getAttemptCount(),
+                    criteriaReference,
                     verification.getId(),
                     media.getObjectKey(),
                     contentType,
@@ -96,6 +107,8 @@ public class VerificationAnalysisInputLoader {
         ANALYSIS_NOT_FOUND,
         STALE_CLAIM,
         INVALID_VERIFICATION,
+        MISSING_CRITERIA,
+        INVALID_CRITERIA,
         MISSING_MEDIA,
         UNCONFIRMED_MEDIA,
         INVALID_MEDIA

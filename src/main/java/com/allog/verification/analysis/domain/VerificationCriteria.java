@@ -1,15 +1,17 @@
 package com.allog.verification.analysis.domain;
 
+import com.allog.routine.domain.RoutineKey;
+
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Backend-owned, provider-neutral criteria resolved for one routine definition.
+ * Backend-owned, provider-neutral criteria bound to one stable Product Routine identity.
  * Product criteria are code-owned and version changes require a new {@link Reference}.
  */
 public record VerificationCriteria(
         Reference reference,
-        long routineDefinitionId,
+        RoutineKey routineKey,
         Set<MediaModality> supportedMedia,
         Set<ObservationType> requiredObservations,
         String evidenceRequirements
@@ -17,9 +19,7 @@ public record VerificationCriteria(
 
     public VerificationCriteria {
         Objects.requireNonNull(reference, "reference must not be null");
-        if (routineDefinitionId <= 0) {
-            throw new IllegalArgumentException("routineDefinitionId must be positive");
-        }
+        Objects.requireNonNull(routineKey, "routineKey must not be null");
         supportedMedia = requireNonEmptyCopy(supportedMedia, "supportedMedia");
         requiredObservations = requireNonEmptyCopy(requiredObservations, "requiredObservations");
         evidenceRequirements = requireText(evidenceRequirements, "evidenceRequirements");
@@ -46,9 +46,32 @@ public record VerificationCriteria(
         public String storageValue() {
             return criteriaId + "@" + version;
         }
+
+        public static Reference fromStorageValue(String value) {
+            String stored = requireText(value, "criteria reference");
+            if (!stored.equals(value)) {
+                throw new IllegalArgumentException("criteria reference must not contain surrounding whitespace");
+            }
+            int separator = stored.lastIndexOf('@');
+            if (separator <= 0 || separator == stored.length() - 1) {
+                throw new IllegalArgumentException("criteria reference must use <criteriaId>@<version>");
+            }
+            try {
+                Reference reference = new Reference(
+                        stored.substring(0, separator),
+                        Integer.parseInt(stored.substring(separator + 1))
+                );
+                if (!reference.storageValue().equals(stored)) {
+                    throw new IllegalArgumentException("criteria reference must use canonical numeric version");
+                }
+                return reference;
+            } catch (NumberFormatException exception) {
+                throw new IllegalArgumentException("criteria reference version must be a positive integer", exception);
+            }
+        }
     }
 
-    /** Vendor-facing criteria deliberately excludes the internal routine definition ID. */
+    /** Vendor-facing criteria deliberately excludes the internal RoutineKey. */
     public record ProviderContract(
             Reference reference,
             Set<MediaModality> supportedMedia,

@@ -16,6 +16,9 @@ public class RoutineDefinition extends BaseTimeEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "routine_key", length = RoutineKey.MAX_LENGTH, unique = true)
+    private String routineKey;
+
     @Column(nullable = false, length = 100)
     private String name;
 
@@ -26,12 +29,21 @@ public class RoutineDefinition extends BaseTimeEntity {
     }
 
     public RoutineDefinition(String name, String description) {
+        this(null, name, description);
+    }
+
+    public RoutineDefinition(RoutineKey routineKey, String name, String description) {
+        this.routineKey = routineKey == null ? null : routineKey.value();
         this.name = requireText(name, "name");
         this.description = description;
     }
 
     public Long getId() {
         return id;
+    }
+
+    public RoutineKey getRoutineKey() {
+        return routineKey == null ? null : new RoutineKey(routineKey);
     }
 
     public String getName() {

@@ -1,5 +1,9 @@
 package com.allog.verification.analysis.domain;
 
+import com.allog.group.domain.RoutineGroup;
+import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineKey;
+import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -7,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -22,6 +27,9 @@ import static org.mockito.Mockito.when;
 class VerificationAnalysisTest {
 
     private static final Instant FIRST_ATTEMPT = Instant.parse("2026-08-14T00:00:00Z");
+    private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    private static final VerificationCriteria.Reference TEST_REFERENCE =
+            new VerificationCriteria.Reference("TEST_EVIDENCE", 1);
 
     @Test
     void createsPendingAnalysisForSubmittedVerification() {
@@ -68,6 +76,36 @@ class VerificationAnalysisTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> VerificationAnalysis.createPending(pending, UUID.randomUUID())
+        );
+    }
+
+    @Test
+    void bindsCriteriaOnlyToMatchingStableRoutineIdentity() {
+        Verification matching = verification(VerificationStatus.SUBMITTED, TEST_ROUTINE_KEY);
+        VerificationAnalysis analysis = VerificationAnalysis.createPending(
+                matching,
+                UUID.randomUUID(),
+                criteria(TEST_ROUTINE_KEY)
+        );
+
+        assertAll(
+                () -> assertEquals(TEST_REFERENCE.storageValue(), analysis.getCriteriaVersion()),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> VerificationAnalysis.createPending(
+                                matching,
+                                UUID.randomUUID(),
+                                criteria(new RoutineKey("OTHER_TEST_ROUTINE"))
+                        )
+                ),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> VerificationAnalysis.createPending(
+                                verification(VerificationStatus.SUBMITTED, null),
+                                UUID.randomUUID(),
+                                criteria(TEST_ROUTINE_KEY)
+                        )
+                )
         );
     }
 
@@ -147,10 +185,10 @@ class VerificationAnalysisTest {
         Instant completedAt = FIRST_ATTEMPT.plusSeconds(30);
 
         analysis.succeed(
+                TEST_REFERENCE,
                 AnalysisRecommendation.REVIEW_REQUIRED,
                 "synthetic-reason",
                 "synthetic-model",
-                "synthetic-criteria",
                 true,
                 new BigDecimal("0.7500"),
                 false,
@@ -163,7 +201,7 @@ class VerificationAnalysisTest {
                 () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
                 () -> assertEquals("synthetic-reason", analysis.getReasonCode()),
                 () -> assertEquals("synthetic-model", analysis.getProviderModel()),
-                () -> assertEquals("synthetic-criteria", analysis.getCriteriaVersion()),
+                () -> assertEquals(TEST_REFERENCE.storageValue(), analysis.getCriteriaVersion()),
                 () -> assertEquals(true, analysis.getObjectPresence()),
                 () -> assertEquals(new BigDecimal("0.7500"), analysis.getRelevanceScore()),
                 () -> assertEquals(false, analysis.getAnomalyDetected()),
@@ -200,7 +238,7 @@ class VerificationAnalysisTest {
         );
         assertAll(
                 () -> assertThrows(IllegalStateException.class, () -> pending.succeed(
-                        AnalysisRecommendation.PASS, null, null, null, null, null, null, null, FIRST_ATTEMPT
+                        TEST_REFERENCE, AnalysisRecommendation.PASS, null, null, null, null, null, null, FIRST_ATTEMPT
                 )),
                 () -> assertThrows(
                         IllegalStateException.class,
@@ -211,11 +249,11 @@ class VerificationAnalysisTest {
         VerificationAnalysis processing = processingAnalysis();
         assertAll(
                 () -> assertThrows(NullPointerException.class, () -> processing.succeed(
-                        null, null, null, null, null, null, null, null, FIRST_ATTEMPT
+                        TEST_REFERENCE, null, null, null, null, null, null, null, FIRST_ATTEMPT
                 )),
                 () -> assertThrows(IllegalArgumentException.class, () -> processing.succeed(
+                        TEST_REFERENCE,
                         AnalysisRecommendation.PASS,
-                        null,
                         null,
                         null,
                         null,
@@ -243,8 +281,8 @@ class VerificationAnalysisTest {
     void terminalAnalysisCannotBeCompletedAgain() {
         VerificationAnalysis succeeded = processingAnalysis();
         succeeded.succeed(
+                TEST_REFERENCE,
                 AnalysisRecommendation.PASS,
-                null,
                 null,
                 null,
                 null,
@@ -255,8 +293,8 @@ class VerificationAnalysisTest {
         );
         assertAll(
                 () -> assertThrows(IllegalStateException.class, () -> succeeded.succeed(
+                        TEST_REFERENCE,
                         AnalysisRecommendation.REVIEW_REQUIRED,
-                        null,
                         null,
                         null,
                         null,
@@ -275,8 +313,8 @@ class VerificationAnalysisTest {
         failed.fail(VerificationAnalysisFailureCode.TIMEOUT, FIRST_ATTEMPT);
         assertAll(
                 () -> assertThrows(IllegalStateException.class, () -> failed.succeed(
+                        TEST_REFERENCE,
                         AnalysisRecommendation.PASS,
-                        null,
                         null,
                         null,
                         null,
@@ -294,8 +332,9 @@ class VerificationAnalysisTest {
 
     private VerificationAnalysis processingAnalysis() {
         VerificationAnalysis analysis = VerificationAnalysis.createPending(
-                verification(VerificationStatus.SUBMITTED),
-                UUID.randomUUID()
+                verification(VerificationStatus.SUBMITTED, TEST_ROUTINE_KEY),
+                UUID.randomUUID(),
+                criteria(TEST_ROUTINE_KEY)
         );
         analysis.startProcessing(FIRST_ATTEMPT);
         return analysis;
@@ -305,5 +344,28 @@ class VerificationAnalysisTest {
         Verification verification = mock(Verification.class);
         when(verification.getStatus()).thenReturn(status);
         return verification;
+    }
+
+    private Verification verification(VerificationStatus status, RoutineKey routineKey) {
+        Verification verification = verification(status);
+        RoutineSchedule schedule = mock(RoutineSchedule.class);
+        RoutineGroup group = mock(RoutineGroup.class);
+        RoutineDefinition definition = routineKey == null
+                ? new RoutineDefinition("test routine", null)
+                : new RoutineDefinition(routineKey, "test routine", null);
+        when(verification.getRoutineSchedule()).thenReturn(schedule);
+        when(schedule.getRoutineGroup()).thenReturn(group);
+        when(group.getRoutineDefinition()).thenReturn(definition);
+        return verification;
+    }
+
+    private VerificationCriteria criteria(RoutineKey routineKey) {
+        return new VerificationCriteria(
+                TEST_REFERENCE,
+                routineKey,
+                Set.of(VerificationCriteria.MediaModality.VIDEO),
+                Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
+                "Test-only evidence requirements"
+        );
     }
 }

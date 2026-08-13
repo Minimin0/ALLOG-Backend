@@ -5,7 +5,7 @@
 ## 책임
 
 - `User`: 현재는 FK 연결을 위한 사용자 식별자만 소유한다.
-- `RoutineDefinition`: 무엇을 수행하는지 정의한다.
+- `RoutineDefinition`: 무엇을 수행하는지 정의하며 nullable stable `RoutineKey`를 가진다.
 - `RoutineGroup`: 어떤 Routine을 어떤 그룹 정책으로 함께 수행하는지 정의한다.
 - `GroupMember`: User와 RoutineGroup 사이의 참여 관계, 현재 상태, 공식 참여 시작 이력을 표현한다.
 - `RoutineSchedule`: 그룹 Routine을 언제 수행할 수 있는지 저장한다.
@@ -87,7 +87,12 @@ UNIQUE group_member(routine_group_id, user_id)
 
 INDEX group_member(user_id, status)
 INDEX group_member(routine_group_id, participation_started_at)
+UNIQUE routine_definition(routine_key)
 ```
+
+`routine_definition.routine_key VARCHAR(64) NULL`은 DB ID, display name, description과 분리된 Product identity다.
+애플리케이션은 `[A-Z][A-Z0-9_]{0,63}` canonical 값을 저장하며 setter/update path를 제공하지 않는다. V7은 기존
+row를 추측해 backfill하지 않으므로 여러 legacy `NULL` row를 허용한다.
 
 `group_member.participation_started_at TIMESTAMP(6) NULL`은 현재 status와 별개인 공식 참여 이력이다. `IS NOT NULL`인 회원은 이후 LEFT/REMOVED가 되어도 fixed denominator 후보로 남는다. Flyway V3는 기존 row를 추론해 backfill하지 않고 NULL로 둔다.
 

@@ -1,5 +1,6 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.routine.domain.RoutineKey;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationCriteria;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,6 +38,7 @@ class VerificationAnalysisMediaProcessorTest {
             CLAIM.analysisId(),
             CLAIM.analysisRequestId(),
             CLAIM.attemptCount(),
+            new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
             20L,
             "verification-media/test",
             "video/mp4",
@@ -100,6 +103,23 @@ class VerificationAnalysisMediaProcessorTest {
                 VerificationAnalysisFailureCode.BAD_REQUEST,
                 processor().process(CLAIM, criteria(VerificationCriteria.MediaModality.PHOTO))
         );
+        verify(provider, never()).analyze(any(), any());
+    }
+
+    @Test
+    void rejectsCriteriaDifferentFromEnqueueProvenance() {
+        when(inputLoader.load(CLAIM)).thenReturn(INPUT);
+
+        VerificationCriteria mismatched = new VerificationCriteria(
+                new VerificationCriteria.Reference("OTHER_TEST_EVIDENCE", 1),
+                new RoutineKey("TEST_ROUTINE"),
+                CRITERIA.supportedMedia(),
+                CRITERIA.requiredObservations(),
+                CRITERIA.evidenceRequirements()
+        );
+
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM, mismatched));
+        verify(storage, never()).acquire(any(), anyLong());
         verify(provider, never()).analyze(any(), any());
     }
 
@@ -191,7 +211,7 @@ class VerificationAnalysisMediaProcessorTest {
     private static VerificationCriteria criteria(VerificationCriteria.MediaModality modality) {
         return new VerificationCriteria(
                 new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                20L,
+                new RoutineKey("TEST_ROUTINE"),
                 Set.of(modality),
                 Set.of(
                         VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,

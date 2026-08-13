@@ -1,5 +1,9 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.group.domain.RoutineGroup;
+import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineKey;
+import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
@@ -28,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -38,6 +43,7 @@ class VerificationAnalysisResultServiceTest {
     private static final Long ANALYSIS_ID = 100L;
     private static final Instant ATTEMPT_STARTED_AT = Instant.parse("2026-08-14T00:00:00Z");
     private static final Instant COMPLETED_AT = Instant.parse("2026-08-14T00:00:30.123456789Z");
+    private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
 
     @Mock
     private VerificationAnalysisRepository repository;
@@ -133,6 +139,28 @@ class VerificationAnalysisResultServiceTest {
     }
 
     @Test
+    void rejectsResultWithDifferentCriteriaProvenanceWithoutMutation() {
+        Fixture fixture = processingFixture();
+        when(repository.findByIdForUpdate(ANALYSIS_ID)).thenReturn(Optional.of(fixture.analysis()));
+        VerificationAnalysisSuccessResult mismatched = new VerificationAnalysisSuccessResult(
+                AnalysisRecommendation.PASS,
+                new VerificationCriteria.Reference("OTHER_TEST_EVIDENCE", 1),
+                successResult(AnalysisRecommendation.PASS).providerResult()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.completeSuccess(fixture.claim(), mismatched)
+        );
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, fixture.analysis().getStatus()),
+                () -> assertEquals("TEST_EVIDENCE@1", fixture.analysis().getCriteriaVersion()),
+                () -> assertNull(fixture.analysis().getRecommendation()),
+                () -> assertNull(fixture.analysis().getCompletedAt())
+        );
+    }
+
+    @Test
     void duplicateAndTerminalCompletionAreRejected() {
         Fixture succeeded = processingFixture();
         when(repository.findByIdForUpdate(ANALYSIS_ID)).thenReturn(Optional.of(succeeded.analysis()));
@@ -183,8 +211,27 @@ class VerificationAnalysisResultServiceTest {
 
     private VerificationAnalysis pendingAnalysis(UUID requestId) {
         Verification verification = mock(Verification.class);
+        RoutineSchedule schedule = mock(RoutineSchedule.class);
+        RoutineGroup group = mock(RoutineGroup.class);
         when(verification.getStatus()).thenReturn(VerificationStatus.SUBMITTED);
-        return VerificationAnalysis.createPending(verification, requestId);
+        when(verification.getRoutineSchedule()).thenReturn(schedule);
+        when(schedule.getRoutineGroup()).thenReturn(group);
+        when(group.getRoutineDefinition()).thenReturn(new RoutineDefinition(
+                TEST_ROUTINE_KEY,
+                "test routine",
+                null
+        ));
+        return VerificationAnalysis.createPending(verification, requestId, criteria());
+    }
+
+    private VerificationCriteria criteria() {
+        return new VerificationCriteria(
+                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+                TEST_ROUTINE_KEY,
+                java.util.Set.of(VerificationCriteria.MediaModality.VIDEO),
+                java.util.Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
+                "Test-only evidence requirements"
+        );
     }
 
     private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {

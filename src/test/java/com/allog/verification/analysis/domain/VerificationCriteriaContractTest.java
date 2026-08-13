@@ -1,5 +1,6 @@
 package com.allog.verification.analysis.domain;
 
+import com.allog.routine.domain.RoutineKey;
 import com.allog.verification.analysis.service.VerificationAnalysisProvider;
 import org.junit.jupiter.api.Test;
 
@@ -17,8 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class VerificationCriteriaContractTest {
 
+    private static final RoutineKey ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+
     @Test
-    void createsImmutableVersionedCriteriaWithoutLeakingRoutineIdToProvider() {
+    void createsImmutableVersionedCriteriaWithoutLeakingRoutineIdentityToProvider() {
         Set<VerificationCriteria.MediaModality> media = new HashSet<>(Set.of(
                 VerificationCriteria.MediaModality.PHOTO
         ));
@@ -33,7 +36,7 @@ class VerificationCriteriaContractTest {
                         () -> criteria.supportedMedia().add(VerificationCriteria.MediaModality.VIDEO)
                 ),
                 () -> assertFalse(Stream.of(criteria.providerContract().getClass().getRecordComponents())
-                        .anyMatch(component -> component.getName().equals("routineDefinitionId")))
+                        .anyMatch(component -> component.getName().equals("routineKey")))
         );
     }
 
@@ -53,10 +56,10 @@ class VerificationCriteriaContractTest {
                         () -> new VerificationCriteria.Reference("TEST", 0)
                 ),
                 () -> assertThrows(
-                        IllegalArgumentException.class,
+                        NullPointerException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                0,
+                                null,
                                 Set.of(VerificationCriteria.MediaModality.PHOTO),
                                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                                 "test evidence"
@@ -66,7 +69,7 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                1,
+                                ROUTINE_KEY,
                                 Set.of(),
                                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                                 "test evidence"
@@ -76,7 +79,7 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                1,
+                                ROUTINE_KEY,
                                 Set.of(VerificationCriteria.MediaModality.PHOTO),
                                 Set.of(),
                                 "test evidence"
@@ -86,11 +89,33 @@ class VerificationCriteriaContractTest {
                         IllegalArgumentException.class,
                         () -> new VerificationCriteria(
                                 new VerificationCriteria.Reference("TEST", 1),
-                                1,
+                                ROUTINE_KEY,
                                 Set.of(VerificationCriteria.MediaModality.PHOTO),
                                 Set.of(VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE),
                                 " "
                         )
+                )
+        );
+    }
+
+    @Test
+    void parsesOnlyCanonicalPersistedReference() {
+        assertAll(
+                () -> assertEquals(
+                        new VerificationCriteria.Reference("TEST_EVIDENCE", 2),
+                        VerificationCriteria.Reference.fromStorageValue("TEST_EVIDENCE@2")
+                ),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> VerificationCriteria.Reference.fromStorageValue("TEST_EVIDENCE@02")
+                ),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> VerificationCriteria.Reference.fromStorageValue("TEST_EVIDENCE")
+                ),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> VerificationCriteria.Reference.fromStorageValue(" TEST_EVIDENCE@2 ")
                 )
         );
     }
@@ -163,7 +188,7 @@ class VerificationCriteriaContractTest {
     private VerificationCriteria criteria(Set<VerificationCriteria.MediaModality> media) {
         return new VerificationCriteria(
                 new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                10L,
+                ROUTINE_KEY,
                 media,
                 Set.of(
                         VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,

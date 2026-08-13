@@ -37,10 +37,10 @@ public class VerificationAnalysisResultService {
         var providerResult = result.providerResult();
         var observation = providerResult.observation();
         analysis.succeed(
+                result.criteriaReference(),
                 result.recommendation(),
                 observation.reasonCode().name(),
                 providerResult.providerModel(),
-                result.criteriaReference().storageValue(),
                 observation.objectPresence(),
                 observation.relevanceScore(),
                 observation.anomalyDetected(),

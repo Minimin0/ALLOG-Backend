@@ -8,6 +8,7 @@ import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.group.repository.GroupMemberRepository;
 import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineKey;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
@@ -53,6 +54,51 @@ class CorePersistenceTest {
         );
 
         assertEquals(1, migrations);
+    }
+
+    @Test
+    void v7PersistsCanonicalRoutineKeyAndKeepsLegacyRowsNullable() {
+        RoutineDefinition keyed = new RoutineDefinition(
+                new RoutineKey(" core_test_routine "),
+                "test routine",
+                null
+        );
+        RoutineDefinition legacy = new RoutineDefinition("legacy routine", null);
+        entityManager.persist(keyed);
+        entityManager.persist(legacy);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '7' and success = true",
+                Integer.class
+        ));
+        assertEquals("CORE_TEST_ROUTINE", entityManager.find(RoutineDefinition.class, keyed.getId())
+                .getRoutineKey().value());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(*) from routine_definition where id = ? and routine_key is null",
+                Integer.class,
+                legacy.getId()
+        ));
+    }
+
+    @Test
+    void preventsDuplicateNormalizedRoutineKey() {
+        entityManager.persist(new RoutineDefinition(
+                new RoutineKey("CORE_TEST_ROUTINE"),
+                "first",
+                null
+        ));
+        entityManager.flush();
+
+        assertThrows(PersistenceException.class, () -> {
+            entityManager.persist(new RoutineDefinition(
+                    new RoutineKey("core_test_routine"),
+                    "second",
+                    null
+            ));
+            entityManager.flush();
+        });
     }
 
     @Test

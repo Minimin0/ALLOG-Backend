@@ -101,18 +101,39 @@ public class VerificationAnalysis extends BaseTimeEntity {
     protected VerificationAnalysis() {
     }
 
-    private VerificationAnalysis(Verification verification, UUID analysisRequestId) {
+    private VerificationAnalysis(Verification verification, UUID analysisRequestId, String criteriaReference) {
         this.verification = Objects.requireNonNull(verification, "verification must not be null");
         this.analysisRequestId = Objects.requireNonNull(analysisRequestId, "analysisRequestId must not be null");
         if (verification.getStatus() != VerificationStatus.SUBMITTED) {
             throw new IllegalStateException("analysis requires a SUBMITTED verification");
         }
+        this.criteriaVersion = criteriaReference;
         this.status = VerificationAnalysisStatus.PENDING;
         this.attemptCount = 0;
     }
 
     public static VerificationAnalysis createPending(Verification verification, UUID analysisRequestId) {
-        return new VerificationAnalysis(verification, analysisRequestId);
+        return new VerificationAnalysis(verification, analysisRequestId, null);
+    }
+
+    public static VerificationAnalysis createPending(
+            Verification verification,
+            UUID analysisRequestId,
+            VerificationCriteria criteria
+    ) {
+        Objects.requireNonNull(criteria, "criteria must not be null");
+        var routineDefinition = Objects.requireNonNull(verification, "verification must not be null")
+                .getRoutineSchedule()
+                .getRoutineGroup()
+                .getRoutineDefinition();
+        var routineKey = routineDefinition.getRoutineKey();
+        if (routineKey == null) {
+            throw new IllegalStateException("criteria binding requires a stable routine key");
+        }
+        if (!routineKey.equals(criteria.routineKey())) {
+            throw new IllegalArgumentException("criteria is not bound to the verification routine");
+        }
+        return new VerificationAnalysis(verification, analysisRequestId, criteria.reference().storageValue());
     }
 
     public void startProcessing(Instant startedAt) {
@@ -147,10 +168,10 @@ public class VerificationAnalysis extends BaseTimeEntity {
     }
 
     public void succeed(
+            VerificationCriteria.Reference expectedCriteriaReference,
             AnalysisRecommendation recommendation,
             String reasonCode,
             String providerModel,
-            String criteriaVersion,
             Boolean objectPresence,
             BigDecimal relevanceScore,
             Boolean anomalyDetected,
@@ -158,6 +179,7 @@ public class VerificationAnalysis extends BaseTimeEntity {
             Instant completedAt
     ) {
         requireProcessingCompletion(completedAt);
+        requireCriteriaReference(expectedCriteriaReference);
         AnalysisRecommendation requiredRecommendation = Objects.requireNonNull(
                 recommendation,
                 "recommendation must not be null"
@@ -167,7 +189,6 @@ public class VerificationAnalysis extends BaseTimeEntity {
         this.recommendation = requiredRecommendation;
         this.reasonCode = reasonCode;
         this.providerModel = providerModel;
-        this.criteriaVersion = criteriaVersion;
         this.objectPresence = objectPresence;
         this.relevanceScore = relevanceScore;
         this.anomalyDetected = anomalyDetected;
@@ -261,6 +282,19 @@ public class VerificationAnalysis extends BaseTimeEntity {
     private void requireRelevanceScore(BigDecimal score) {
         if (score != null && (score.signum() < 0 || score.compareTo(BigDecimal.ONE) > 0)) {
             throw new IllegalArgumentException("relevanceScore must be between 0 and 1");
+        }
+    }
+
+    private void requireCriteriaReference(VerificationCriteria.Reference expected) {
+        String expectedValue = Objects.requireNonNull(
+                expected,
+                "expectedCriteriaReference must not be null"
+        ).storageValue();
+        if (criteriaVersion == null) {
+            throw new IllegalStateException("analysis has no enqueue-bound criteria reference");
+        }
+        if (!criteriaVersion.equals(expectedValue)) {
+            throw new IllegalArgumentException("analysis criteria reference does not match the processing result");
         }
     }
 }

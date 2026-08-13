@@ -7,6 +7,7 @@ import com.allog.group.domain.GroupVisibility;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineKey;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
@@ -85,6 +86,7 @@ class VerificationAnalysisPersistenceTest {
     private static final Instant SUBMITTED_AT = Instant.parse("2026-08-11T10:00:00Z");
     private static final Instant COMPLETED_AT = Instant.parse("2026-08-11T10:01:00Z");
     private static final Instant WORKER_NOW = Instant.parse("2026-08-14T00:00:00Z");
+    private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
 
     @Autowired
     private VerificationAnalysisRepository repository;
@@ -296,14 +298,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV6() {
+    void flywayAppliedExactlyV1ThroughV7() {
         assertAll(
-                () -> assertEquals(6, jdbcTemplate.queryForObject(
+                () -> assertEquals(7, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '6' and success = true",
+                        "select count(*) from flyway_schema_history where version = '7' and success = true",
                         Integer.class
                 ))
         );
@@ -404,6 +406,7 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(VerificationAnalysisStatus.PENDING, recovered.getStatus()),
                 () -> assertEquals(1, recovered.getAttemptCount()),
                 () -> assertEquals(WORKER_NOW, recovered.getLastAttemptAt()),
+                () -> assertEquals(criteria().reference().storageValue(), recovered.getCriteriaVersion()),
                 () -> assertEquals(1, clock.reads())
         );
 
@@ -414,6 +417,7 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(2, retry.attemptCount()),
                 () -> assertEquals(VerificationAnalysisStatus.PROCESSING, processingAgain.getStatus()),
                 () -> assertEquals(2, processingAgain.getAttemptCount()),
+                () -> assertEquals(criteria().reference().storageValue(), processingAgain.getCriteriaVersion()),
                 () -> assertEquals(WORKER_NOW.plusSeconds(300), processingAgain.getLastAttemptAt())
         );
     }
@@ -548,6 +552,7 @@ class VerificationAnalysisPersistenceTest {
         assertAll(
                 () -> assertEquals(VerificationAnalysisStatus.PROCESSING, stillProcessing.getStatus()),
                 () -> assertEquals(2, stillProcessing.getAttemptCount()),
+                () -> assertEquals(criteria().reference().storageValue(), stillProcessing.getCriteriaVersion()),
                 () -> assertNull(stillProcessing.getRecommendation()),
                 () -> assertNull(stillProcessing.getCompletedAt()),
                 () -> assertEquals(0, clock.reads())
@@ -561,6 +566,7 @@ class VerificationAnalysisPersistenceTest {
         assertAll(
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, succeeded.getStatus()),
                 () -> assertEquals(2, succeeded.getAttemptCount()),
+                () -> assertEquals(criteria().reference().storageValue(), succeeded.getCriteriaVersion()),
                 () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, succeeded.getRecommendation()),
                 () -> assertEquals(WORKER_NOW.plusSeconds(330), succeeded.getCompletedAt()),
                 () -> assertEquals(1, clock.reads())
@@ -955,6 +961,7 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(analysisId, input.analysisId()),
                 () -> assertEquals(claim.analysisRequestId(), input.analysisRequestId()),
                 () -> assertEquals(claim.attemptCount(), input.attemptCount()),
+                () -> assertEquals(criteria().reference(), input.criteriaReference()),
                 () -> assertEquals("video/mp4", input.contentType()),
                 () -> assertEquals(4, input.sizeBytes()),
                 () -> assertTrue(input.objectKey().startsWith("verification-media/")),
@@ -998,6 +1005,15 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysisClaim unconfirmed = claimService.claimNextPending().orElseThrow();
         assertEquals(unconfirmedId, unconfirmed.analysisId());
         assertLoadReason(VerificationAnalysisInputLoader.Reason.UNCONFIRMED_MEDIA, unconfirmed);
+    }
+
+    @Test
+    void inputLoaderRejectsLegacyAnalysisWithoutEnqueueProvenance() {
+        Long analysisId = legacyPendingAnalysisWithMedia();
+        VerificationAnalysisClaim claim = claimService.claimNextPending().orElseThrow();
+
+        assertEquals(analysisId, claim.analysisId());
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.MISSING_CRITERIA, claim);
     }
 
     @Test
@@ -1138,7 +1154,11 @@ class VerificationAnalysisPersistenceTest {
     private Long pendingAnalysisId() {
         return inTransaction(() -> {
             Verification verification = persistSubmittedVerification();
-            VerificationAnalysis analysis = VerificationAnalysis.createPending(verification, UUID.randomUUID());
+            VerificationAnalysis analysis = VerificationAnalysis.createPending(
+                    verification,
+                    UUID.randomUUID(),
+                    criteria()
+            );
             repository.saveAndFlush(analysis);
             return analysis.getId();
         });
@@ -1156,6 +1176,27 @@ class VerificationAnalysisPersistenceTest {
             if (confirmed) {
                 media.confirm(sizeBytes, Clock.fixed(WORKER_NOW, ZoneOffset.UTC));
             }
+            entityManager.persist(media);
+            VerificationAnalysis analysis = VerificationAnalysis.createPending(
+                    verification,
+                    UUID.randomUUID(),
+                    criteria()
+            );
+            repository.saveAndFlush(analysis);
+            return analysis.getId();
+        });
+    }
+
+    private Long legacyPendingAnalysisWithMedia() {
+        return inTransaction(() -> {
+            Verification verification = persistSubmittedVerification();
+            VerificationMedia media = VerificationMedia.create(
+                    verification,
+                    "verification-media/" + UUID.randomUUID(),
+                    "video/mp4",
+                    4
+            );
+            media.confirm(4, Clock.fixed(WORKER_NOW, ZoneOffset.UTC));
             entityManager.persist(media);
             VerificationAnalysis analysis = VerificationAnalysis.createPending(
                     verification,
@@ -1232,7 +1273,7 @@ class VerificationAnalysisPersistenceTest {
     private VerificationCriteria criteria() {
         return new VerificationCriteria(
                 new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
-                1L,
+                TEST_ROUTINE_KEY,
                 Set.of(VerificationCriteria.MediaModality.VIDEO),
                 Set.of(
                         VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,
@@ -1267,9 +1308,19 @@ class VerificationAnalysisPersistenceTest {
 
     private Verification persistSubmittedVerification() {
         User user = User.create();
-        RoutineDefinition definition = new RoutineDefinition("water", null);
         entityManager.persist(user);
-        entityManager.persist(definition);
+        RoutineDefinition definition = entityManager.createQuery(
+                        "select definition from RoutineDefinition definition where definition.routineKey = :key",
+                        RoutineDefinition.class
+                )
+                .setParameter("key", TEST_ROUTINE_KEY.value())
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> {
+                    RoutineDefinition created = new RoutineDefinition(TEST_ROUTINE_KEY, "water", null);
+                    entityManager.persist(created);
+                    return created;
+                });
         RoutineGroup group = new RoutineGroup(
                 definition,
                 user,

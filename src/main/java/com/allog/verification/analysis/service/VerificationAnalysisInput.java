@@ -1,5 +1,7 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.verification.analysis.domain.VerificationCriteria;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -7,6 +9,7 @@ public record VerificationAnalysisInput(
         Long analysisId,
         UUID analysisRequestId,
         int attemptCount,
+        VerificationCriteria.Reference criteriaReference,
         Long verificationId,
         String objectKey,
         String contentType,
@@ -16,6 +19,7 @@ public record VerificationAnalysisInput(
     public VerificationAnalysisInput {
         Objects.requireNonNull(analysisId, "analysisId must not be null");
         Objects.requireNonNull(analysisRequestId, "analysisRequestId must not be null");
+        Objects.requireNonNull(criteriaReference, "criteriaReference must not be null");
         Objects.requireNonNull(verificationId, "verificationId must not be null");
         objectKey = requireText(objectKey, "objectKey");
         contentType = requireText(contentType, "contentType");
