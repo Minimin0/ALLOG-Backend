@@ -115,6 +115,37 @@ public class VerificationAnalysis extends BaseTimeEntity {
         return new VerificationAnalysis(verification, analysisRequestId);
     }
 
+    public void startProcessing(Instant startedAt) {
+        if (status != VerificationAnalysisStatus.PENDING) {
+            throw new IllegalStateException("only PENDING analysis can start processing");
+        }
+        Instant requiredStartedAt = Objects.requireNonNull(startedAt, "startedAt must not be null");
+        if (lastAttemptAt != null && requiredStartedAt.isBefore(lastAttemptAt)) {
+            throw new IllegalStateException("lastAttemptAt must not move backwards");
+        }
+        int nextAttemptCount = Math.incrementExact(attemptCount);
+        this.status = VerificationAnalysisStatus.PROCESSING;
+        this.attemptCount = nextAttemptCount;
+        this.lastAttemptAt = requiredStartedAt;
+    }
+
+    public void recoverForRetry(Instant staleAtOrBefore) {
+        if (!isRetryEligible(staleAtOrBefore) || status != VerificationAnalysisStatus.PROCESSING) {
+            throw new IllegalStateException("only stale PROCESSING analysis can be recovered");
+        }
+        this.status = VerificationAnalysisStatus.PENDING;
+    }
+
+    public boolean isRetryEligible(Instant staleAtOrBefore) {
+        Objects.requireNonNull(staleAtOrBefore, "staleAtOrBefore must not be null");
+        if (status == VerificationAnalysisStatus.PENDING) {
+            return true;
+        }
+        return status == VerificationAnalysisStatus.PROCESSING
+                && lastAttemptAt != null
+                && !lastAttemptAt.isAfter(staleAtOrBefore);
+    }
+
     public Long getId() {
         return id;
     }
