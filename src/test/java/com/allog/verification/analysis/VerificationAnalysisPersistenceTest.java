@@ -17,8 +17,10 @@ import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.VerificationAnalysisClaim;
 import com.allog.verification.analysis.service.VerificationAnalysisClaimService;
+import com.allog.verification.analysis.service.VerificationAnalysisProcessor;
 import com.allog.verification.analysis.service.VerificationAnalysisResultService;
 import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult;
+import com.allog.verification.analysis.service.VerificationAnalysisWorker;
 import com.allog.verification.domain.Verification;
 import jakarta.persistence.EntityManager;
 import org.hibernate.SessionFactory;
@@ -53,6 +55,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -90,6 +93,9 @@ class VerificationAnalysisPersistenceTest {
 
     @Autowired
     private VerificationAnalysisResultService resultService;
+
+    @Autowired
+    private VerificationAnalysisWorker productionWorker;
 
     @Autowired
     private MutableClock clock;
@@ -700,6 +706,220 @@ class VerificationAnalysisPersistenceTest {
         );
     }
 
+    @Test
+    void productionWorkerWithoutProcessorDoesNotClaim() {
+        Long analysisId = pendingAnalysisId();
+
+        assertEquals(
+                VerificationAnalysisWorker.ExecutionResult.PROCESSOR_UNAVAILABLE,
+                productionWorker.processNext()
+        );
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PENDING, analysis.getStatus()),
+                () -> assertEquals(0, analysis.getAttemptCount()),
+                () -> assertNull(analysis.getLastAttemptAt()),
+                () -> assertEquals(0, clock.reads())
+        );
+    }
+
+    @Test
+    void workerPersistsSyntheticSuccessWithFiveStatementsAndTransactionSeparation() {
+        Long analysisId = pendingAnalysisId();
+        AtomicBoolean processorTransaction = new AtomicBoolean(true);
+        VerificationAnalysisWorker worker = worker(claim -> {
+            processorTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        });
+        clock.resetReads();
+        SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
+        var statistics = sessionFactory.getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+
+        VerificationAnalysisWorker.ExecutionResult executionResult;
+        long statements;
+        try {
+            executionResult = worker.processNext();
+            statements = statistics.getPrepareStatementCount();
+        } finally {
+            statistics.setStatisticsEnabled(false);
+        }
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, executionResult),
+                () -> assertEquals(5, statements),
+                () -> assertFalse(processorTransaction.get()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
+                () -> assertEquals(2, clock.reads()),
+                () -> assertEquals(2, clock.transactionalReads()),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW, analysis.getCompletedAt()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt())
+        );
+    }
+
+    @Test
+    void workerPersistsProcessorClassifiedFailureWithoutRetry() {
+        Long analysisId = pendingAnalysisId();
+        AtomicInteger calls = new AtomicInteger();
+        VerificationAnalysisWorker worker = worker(claim -> {
+            calls.incrementAndGet();
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return new VerificationAnalysisProcessor.Failure(VerificationAnalysisFailureCode.TIMEOUT);
+        });
+
+        assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, worker.processNext());
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(1, calls.get()),
+                () -> assertEquals(VerificationAnalysisStatus.FAILED, analysis.getStatus()),
+                () -> assertEquals(VerificationAnalysisFailureCode.TIMEOUT, analysis.getFailureCode()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW, analysis.getCompletedAt()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void workerWithProcessorAndNoPendingAnalysisIsNoWork() {
+        AtomicInteger calls = new AtomicInteger();
+        VerificationAnalysisWorker worker = worker(claim -> {
+            calls.incrementAndGet();
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        });
+
+        assertEquals(VerificationAnalysisWorker.ExecutionResult.NO_WORK, worker.processNext());
+        assertEquals(0, calls.get());
+    }
+
+    @Test
+    void staleWorkerResultIsRejectedAfterCurrentWorkerCompletes() throws Exception {
+        Long analysisId = pendingAnalysisId();
+        CountDownLatch processorStarted = new CountDownLatch(1);
+        CountDownLatch releaseProcessor = new CountDownLatch(1);
+        AtomicBoolean oldProcessorTransaction = new AtomicBoolean(true);
+        VerificationAnalysisWorker oldWorker = worker(claim -> {
+            oldProcessorTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            processorStarted.countDown();
+            await(releaseProcessor);
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<VerificationAnalysisWorker.ExecutionResult> oldResult = executor.submit(oldWorker::processNext);
+            assertTrue(processorStarted.await(5, TimeUnit.SECONDS));
+
+            clock.set(WORKER_NOW.plusSeconds(300));
+            assertTrue(claimService.recoverNextStaleProcessing());
+            clock.set(WORKER_NOW.plusSeconds(330));
+            VerificationAnalysisWorker currentWorker = worker(claim ->
+                    new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.REVIEW_REQUIRED))
+            );
+            assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, currentWorker.processNext());
+
+            releaseProcessor.countDown();
+            assertEquals(
+                    VerificationAnalysisWorker.ExecutionResult.STALE_RESULT_REJECTED,
+                    oldResult.get(10, TimeUnit.SECONDS)
+            );
+        } finally {
+            releaseProcessor.countDown();
+            executor.shutdownNow();
+        }
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertFalse(oldProcessorTransaction.get()),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(2, analysis.getAttemptCount()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(330), analysis.getCompletedAt())
+        );
+    }
+
+    @Test
+    void concurrentWorkersProcessOnePendingAnalysisOnce() throws Exception {
+        Long analysisId = pendingAnalysisId();
+        AtomicInteger processorCalls = new AtomicInteger();
+        VerificationAnalysisProcessor processor = claim -> {
+            processorCalls.incrementAndGet();
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        };
+        VerificationAnalysisWorker firstWorker = worker(processor);
+        VerificationAnalysisWorker secondWorker = worker(processor);
+
+        List<VerificationAnalysisWorker.ExecutionResult> results = concurrently(
+                firstWorker::processNext,
+                secondWorker::processNext
+        );
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(1, processorCalls.get()),
+                () -> assertEquals(1, results.stream()
+                        .filter(result -> result == VerificationAnalysisWorker.ExecutionResult.COMPLETED)
+                        .count()),
+                () -> assertEquals(1, results.stream()
+                        .filter(result -> result == VerificationAnalysisWorker.ExecutionResult.NO_WORK)
+                        .count()),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(1, analysis.getAttemptCount())
+        );
+    }
+
+    @Test
+    void processorRuntimeExceptionLeavesRecoverableProcessingAttempt() {
+        Long analysisId = pendingAnalysisId();
+        VerificationAnalysisWorker worker = worker(claim -> {
+            throw new IllegalStateException("synthetic processor failure");
+        });
+
+        assertEquals(VerificationAnalysisWorker.ExecutionResult.PROCESSOR_EXCEPTION, worker.processNext());
+        VerificationAnalysis processing = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, processing.getStatus()),
+                () -> assertNull(processing.getRecommendation()),
+                () -> assertNull(processing.getFailureCode()),
+                () -> assertNull(processing.getCompletedAt())
+        );
+
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        assertEquals(
+                VerificationAnalysisStatus.PENDING,
+                repository.findById(analysisId).orElseThrow().getStatus()
+        );
+    }
+
+    @Test
+    void resultFailureRollsBackAndPropagatesWithoutPartialTerminalState() {
+        Long analysisId = pendingAnalysisId();
+        VerificationAnalysisWorker worker = worker(claim -> {
+            clock.set(WORKER_NOW.minusSeconds(1));
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        });
+
+        assertThrows(IllegalStateException.class, worker::processNext);
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, analysis.getStatus()),
+                () -> assertEquals(1, analysis.getAttemptCount()),
+                () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertNull(analysis.getFailureCode()),
+                () -> assertNull(analysis.getCompletedAt()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
     private Long submittedVerificationId() {
         return inTransaction(() -> persistSubmittedVerification().getId());
     }
@@ -718,6 +938,10 @@ class VerificationAnalysisPersistenceTest {
         return claimService.claimNextPending()
                 .filter(claim -> claim.analysisId().equals(analysisId))
                 .orElseThrow();
+    }
+
+    private VerificationAnalysisWorker worker(VerificationAnalysisProcessor processor) {
+        return new VerificationAnalysisWorker(claimService, resultService, Optional.of(processor));
     }
 
     private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {
@@ -868,6 +1092,17 @@ class VerificationAnalysisPersistenceTest {
         return command.get();
     }
 
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("processor was not released");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("processor was interrupted", exception);
+        }
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class WorkerTestConfiguration {
 
@@ -882,6 +1117,7 @@ class VerificationAnalysisPersistenceTest {
 
         private final AtomicReference<Instant> instant;
         private final AtomicInteger reads = new AtomicInteger();
+        private final AtomicInteger transactionalReads = new AtomicInteger();
 
         MutableClock(Instant instant) {
             this.instant = new AtomicReference<>(instant);
@@ -895,8 +1131,13 @@ class VerificationAnalysisPersistenceTest {
             return reads.get();
         }
 
+        int transactionalReads() {
+            return transactionalReads.get();
+        }
+
         void resetReads() {
             reads.set(0);
+            transactionalReads.set(0);
         }
 
         @Override
@@ -912,6 +1153,9 @@ class VerificationAnalysisPersistenceTest {
         @Override
         public Instant instant() {
             reads.incrementAndGet();
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                transactionalReads.incrementAndGet();
+            }
             return instant.get();
         }
     }
