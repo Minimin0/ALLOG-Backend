@@ -62,6 +62,20 @@ class RoutineScheduleCalculatorTest {
         );
     }
 
+    @ParameterizedTest
+    @MethodSource("participationEligibilityCases")
+    void filtersParticipationEligibleDatesByDeadline(
+            Instant participationStartedAt,
+            List<LocalDate> expected
+    ) {
+        RoutineSchedule schedule = daily("2026-08-10", "2026-08-12", "Asia/Seoul");
+
+        assertEquals(
+                expected,
+                calculator.participationEligibleScheduledDates(schedule, participationStartedAt)
+        );
+    }
+
     @Test
     void crossesMonthBoundaryWithoutSpecialCalendarLogic() {
         RoutineSchedule schedule = daily("2026-08-29", "2026-09-04", "Asia/Seoul");
@@ -229,6 +243,27 @@ class RoutineScheduleCalculatorTest {
         );
     }
 
+    private static Stream<Arguments> participationEligibilityCases() {
+        return Stream.of(
+                Arguments.of(
+                        Instant.parse("2026-08-10T13:59:59Z"),
+                        List.of(date("2026-08-10"), date("2026-08-11"), date("2026-08-12"))
+                ),
+                Arguments.of(
+                        Instant.parse("2026-08-11T13:59:59Z"),
+                        List.of(date("2026-08-11"), date("2026-08-12"))
+                ),
+                Arguments.of(
+                        Instant.parse("2026-08-11T14:00:00Z"),
+                        List.of(date("2026-08-12"))
+                ),
+                Arguments.of(
+                        Instant.parse("2026-08-11T14:00:01Z"),
+                        List.of(date("2026-08-12"))
+                )
+        );
+    }
+
     private RoutineSchedule daily(String start, String end, String timezone) {
         return schedule(ScheduleType.DAILY, start, end, timezone, Set.of());
     }
@@ -270,7 +305,7 @@ class RoutineScheduleCalculatorTest {
         return Clock.fixed(Instant.parse(instant), ZoneId.of("Asia/Seoul"));
     }
 
-    private LocalDate date(String value) {
+    private static LocalDate date(String value) {
         return LocalDate.parse(value);
     }
 }

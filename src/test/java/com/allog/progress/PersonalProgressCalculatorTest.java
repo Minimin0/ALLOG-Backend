@@ -141,6 +141,65 @@ class PersonalProgressCalculatorTest {
     }
 
     @Test
+    void midScheduleParticipationUsesOnlyEligibleOpportunitiesForAllProgressFacts() {
+        Fixture fixture = dailyStartedAt(
+                "2026-08-01",
+                "2026-08-08",
+                3,
+                "2026-08-05T00:00:00Z"
+        );
+        PersonalProgressFacts facts = calculate(
+                fixture,
+                List.of(
+                        verification(fixture, "2026-08-05", VerificationStatus.APPROVED),
+                        verification(fixture, "2026-08-07", VerificationStatus.APPROVED),
+                        verification(fixture, "2026-08-08", VerificationStatus.APPROVED)
+                ),
+                "2026-08-08T10:00:00Z"
+        );
+
+        assertAll(
+                () -> assertEquals(3, facts.completedCount()),
+                () -> assertEquals(0, facts.remainingOpportunityCount()),
+                () -> assertEquals(2, facts.currentStreak()),
+                () -> assertEquals(1, facts.previousBestStreak())
+        );
+    }
+
+    @Test
+    void sameDayParticipationBeforeDeadlineIncludesToday() {
+        Fixture fixture = dailyStartedAt(
+                "2026-08-05", "2026-08-06", 2, "2026-08-05T13:00:00Z"
+        );
+
+        PersonalProgressFacts facts = calculate(fixture, List.of(), "2026-08-05T13:30:00Z");
+
+        assertAll(
+                () -> assertTrue(facts.todayScheduled()),
+                () -> assertEquals(2, facts.remainingOpportunityCount()),
+                () -> assertEquals(
+                        Instant.parse("2026-08-05T14:00:00Z"),
+                        facts.certificationDeadline().orElseThrow()
+                )
+        );
+    }
+
+    @Test
+    void sameDayParticipationAfterDeadlineExcludesToday() {
+        Fixture fixture = dailyStartedAt(
+                "2026-08-05", "2026-08-06", 1, "2026-08-05T14:00:01Z"
+        );
+
+        PersonalProgressFacts facts = calculate(fixture, List.of(), "2026-08-05T14:30:00Z");
+
+        assertAll(
+                () -> assertFalse(facts.todayScheduled()),
+                () -> assertEquals(1, facts.remainingOpportunityCount()),
+                () -> assertTrue(facts.certificationDeadline().isEmpty())
+        );
+    }
+
+    @Test
     void streakUsesScheduledOpportunitySequence() {
         Fixture fixture = daily("2026-08-01", "2026-08-03", 3);
         PersonalProgressFacts facts = calculate(
@@ -293,6 +352,40 @@ class PersonalProgressCalculatorTest {
     }
 
     @Test
+    void rejectsVerificationBeforeParticipationBoundary() {
+        Fixture fixture = dailyStartedAt(
+                "2026-08-01", "2026-08-08", 3, "2026-08-05T00:00:00Z"
+        );
+        Verification beforeParticipation = verification(
+                fixture,
+                "2026-08-04",
+                VerificationStatus.PENDING_UPLOAD
+        );
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> calculate(fixture, List.of(beforeParticipation), "2026-08-08T10:00:00Z")
+        );
+    }
+
+    @Test
+    void rejectsFullProgressForJoinedMemberWithoutParticipationStart() {
+        Fixture fixture = daily("2026-08-11", "2026-08-13", 3);
+        GroupMember joined = new GroupMember(
+                fixture.member().getRoutineGroup(),
+                User.create(),
+                GroupMemberRole.MEMBER,
+                GroupMemberStatus.JOINED,
+                Instant.parse("2026-08-01T09:00:00Z")
+        );
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> calculator.calculate(joined, fixture.schedule(), List.of(), clock("2026-08-11T10:00:00Z"))
+        );
+    }
+
+    @Test
     void rejectsVerificationFromAnotherProgressTarget() {
         Fixture target = daily("2026-08-11", "2026-08-13", 3);
         Fixture other = daily("2026-08-11", "2026-08-13", 3);
@@ -386,11 +479,34 @@ class PersonalProgressCalculatorTest {
     }
 
     private Fixture daily(String startDate, String endDate, int requiredCount) {
-        return fixture(ScheduleType.DAILY, startDate, endDate, requiredCount, Set.of());
+        return dailyStartedAt(startDate, endDate, requiredCount, "2026-08-01T09:00:00Z");
+    }
+
+    private Fixture dailyStartedAt(
+            String startDate,
+            String endDate,
+            int requiredCount,
+            String participationStartedAt
+    ) {
+        return fixture(
+                ScheduleType.DAILY,
+                startDate,
+                endDate,
+                requiredCount,
+                Set.of(),
+                Instant.parse(participationStartedAt)
+        );
     }
 
     private Fixture specific(String startDate, String endDate, int requiredCount, DayOfWeek... days) {
-        return fixture(ScheduleType.SPECIFIC_DAYS, startDate, endDate, requiredCount, Set.of(days));
+        return fixture(
+                ScheduleType.SPECIFIC_DAYS,
+                startDate,
+                endDate,
+                requiredCount,
+                Set.of(days),
+                Instant.parse("2026-08-01T09:00:00Z")
+        );
     }
 
     private Fixture fixture(
@@ -398,7 +514,8 @@ class PersonalProgressCalculatorTest {
             String startDate,
             String endDate,
             int requiredCount,
-            Set<DayOfWeek> days
+            Set<DayOfWeek> days,
+            Instant participationStartedAt
     ) {
         User user = User.create();
         RoutineGroup group = new RoutineGroup(
@@ -423,9 +540,10 @@ class PersonalProgressCalculatorTest {
                 group,
                 user,
                 GroupMemberRole.MEMBER,
-                GroupMemberStatus.ACTIVE,
+                GroupMemberStatus.JOINED,
                 Instant.parse("2026-08-01T09:00:00Z")
         );
+        member.startParticipation(participationStartedAt);
         return new Fixture(member, schedule);
     }
 

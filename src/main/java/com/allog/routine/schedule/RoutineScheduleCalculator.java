@@ -41,6 +41,19 @@ public final class RoutineScheduleCalculator {
         }
     }
 
+    public List<LocalDate> participationEligibleScheduledDates(
+            RoutineSchedule schedule,
+            Instant participationStartedAt
+    ) {
+        Instant startedAt = Objects.requireNonNull(
+                participationStartedAt,
+                "participationStartedAt must not be null"
+        );
+        return scheduledDates(schedule).stream()
+                .filter(date -> startedAt.isBefore(deadlineFor(schedule, date).orElseThrow()))
+                .toList();
+    }
+
     public int totalScheduledOpportunityCount(RoutineSchedule schedule) {
         return scheduledDates(schedule).size();
     }

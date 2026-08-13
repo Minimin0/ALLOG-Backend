@@ -72,6 +72,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProductionAiCoachIntegrationTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-11T10:00:00Z"), ZoneOffset.UTC);
+    private static final Clock ACTIVATION_CLOCK = Clock.fixed(
+            Instant.parse("2026-08-07T00:00:00Z"),
+            ZoneOffset.UTC
+    );
 
     @Autowired
     private ProductionAiCoachApplicationService applicationService;
@@ -242,7 +246,7 @@ class ProductionAiCoachIntegrationTest {
 
     private Fixture activeFixture(GroupMemberStatus... statuses) {
         Fixture fixture = fixture(RoutineGroupStatus.RECRUITING, true, statuses);
-        activationService.activate(fixture.groupId(), CLOCK);
+        activationService.activate(fixture.groupId(), ACTIVATION_CLOCK);
         return fixture;
     }
 

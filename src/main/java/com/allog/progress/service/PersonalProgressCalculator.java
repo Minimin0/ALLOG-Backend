@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class PersonalProgressCalculator {
@@ -36,11 +37,18 @@ public final class PersonalProgressCalculator {
         if (!sameGroup(groupMember.getRoutineGroup(), routineSchedule.getRoutineGroup())) {
             throw new IllegalArgumentException("groupMember and routineSchedule must belong to the same group");
         }
+        Instant participationStartedAt = groupMember.getParticipationStartedAt();
+        if (participationStartedAt == null) {
+            throw new IllegalStateException("full personal progress requires participationStartedAt");
+        }
 
         Instant now = clock.instant();
         Clock fixedClock = Clock.fixed(now, clock.getZone());
         LocalDate today = LocalDate.ofInstant(now, ZoneId.of(routineSchedule.getTimezone()));
-        List<LocalDate> scheduledDates = scheduleCalculator.scheduledDates(routineSchedule);
+        List<LocalDate> scheduledDates = scheduleCalculator.participationEligibleScheduledDates(
+                routineSchedule,
+                participationStartedAt
+        );
         int requiredCompletionCount = routineSchedule.getRoutineGroup().getRequiredCompletionCount();
         if (requiredCompletionCount > scheduledDates.size()) {
             throw new IllegalStateException(
@@ -84,7 +92,7 @@ public final class PersonalProgressCalculator {
             }
         }
 
-        boolean todayScheduled = scheduleCalculator.isTodayScheduled(routineSchedule, fixedClock);
+        boolean todayScheduled = scheduledDates.contains(today);
         Verification todayVerification = verificationByDate.get(today);
         boolean todayCompleted = todayScheduled
                 && todayVerification != null
@@ -103,7 +111,9 @@ public final class PersonalProgressCalculator {
                 previousBestStreak,
                 remainingOpportunityCount,
                 pendingDecisionCount,
-                scheduleCalculator.todayDeadline(routineSchedule, fixedClock),
+                todayScheduled
+                        ? scheduleCalculator.deadlineFor(routineSchedule, today)
+                        : Optional.empty(),
                 groupMember.getStatus()
         );
     }
@@ -123,7 +133,9 @@ public final class PersonalProgressCalculator {
                 throw new IllegalStateException("verification does not belong to the progress target");
             }
             if (!scheduledDates.contains(verification.getScheduledDate())) {
-                throw new IllegalStateException("verification scheduledDate is not a scheduled opportunity");
+                throw new IllegalStateException(
+                        "verification scheduledDate is not a participation-eligible scheduled opportunity"
+                );
             }
             if (verification.getScheduledDate().isAfter(today)
                     && verification.getStatus().countsAsProgress()) {

@@ -266,9 +266,10 @@ class ParticipationCompletionEvaluatorTest {
                 group,
                 user,
                 GroupMemberRole.MEMBER,
-                GroupMemberStatus.ACTIVE,
+                GroupMemberStatus.JOINED,
                 Instant.parse("2026-08-01T09:00:00Z")
         );
+        member.startParticipation(Instant.parse("2026-08-01T09:00:00Z"));
         return new Fixture(member, schedule);
     }
 

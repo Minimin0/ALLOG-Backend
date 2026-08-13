@@ -9,6 +9,8 @@ import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.group.repository.GroupMemberRepository;
 import com.allog.group.repository.RoutineGroupRepository;
 import com.allog.routine.domain.RoutineDefinition;
+import com.allog.routine.domain.RoutineSchedule;
+import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +25,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,9 +39,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:membership-lifecycle;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1"
+        "spring.datasource.url=${ACTIVATION_TEST_DB_URL:jdbc:h2:mem:membership-lifecycle;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1}",
+        "spring.datasource.username=${ACTIVATION_TEST_DB_USERNAME:sa}",
+        "spring.datasource.password=${ACTIVATION_TEST_DB_PASSWORD:}",
+        "spring.datasource.driver-class-name=${ACTIVATION_TEST_DB_DRIVER:org.h2.Driver}"
 })
 @ActiveProfiles("test")
 class RoutineGroupActivationServiceTest {
@@ -81,7 +92,7 @@ class RoutineGroupActivationServiceTest {
     }
 
     @Test
-    void atomicallyActivatesJoinedMembersWithOneTimestamp() {
+    void atomicallyActivatesLateButFeasibleGroupWithOneClockReadAndTimestamp() {
         Fixture fixture = fixture(
                 RoutineGroupStatus.RECRUITING,
                 GroupMemberStatus.JOINED,
@@ -89,11 +100,14 @@ class RoutineGroupActivationServiceTest {
                 GroupMemberStatus.LEFT,
                 GroupMemberStatus.REMOVED
         );
+        Clock clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(ACTIVATION_TIME);
 
-        service.activate(fixture.groupId(), CLOCK);
+        service.activate(fixture.groupId(), clock);
 
         RoutineGroup group = inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow());
         Map<Long, GroupMember> members = membersById(fixture.groupId());
+        verify(clock, times(1)).instant();
         assertEquals(RoutineGroupStatus.ACTIVE, group.getStatus());
         assertStarted(members.get(fixture.memberIds().get(0)));
         assertStarted(members.get(fixture.memberIds().get(1)));
@@ -117,6 +131,56 @@ class RoutineGroupActivationServiceTest {
                 RoutineGroupStatus.RECRUITING,
                 inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow().getStatus())
         );
+    }
+
+    @Test
+    void rejectsActivationWithoutScheduleAndKeepsMemberJoined() {
+        Fixture fixture = fixtureWithoutSchedule(
+                RoutineGroupStatus.RECRUITING,
+                GroupMemberStatus.JOINED
+        );
+
+        assertThrows(IllegalStateException.class, () -> service.activate(fixture.groupId(), CLOCK));
+
+        assertActivationUnchanged(fixture, RoutineGroupStatus.RECRUITING);
+    }
+
+    @Test
+    void rejectsLateActivationWhenRemainingOpportunitiesCannotMeetRequirement() {
+        Fixture fixture = fixtureWithSchedule(
+                RoutineGroupStatus.RECRUITING,
+                5,
+                LocalDate.of(2026, 8, 11),
+                LocalDate.of(2026, 8, 13),
+                GroupMemberStatus.JOINED,
+                GroupMemberStatus.JOINED
+        );
+
+        assertThrows(IllegalStateException.class, () -> service.activate(fixture.groupId(), CLOCK));
+
+        assertActivationUnchanged(fixture, RoutineGroupStatus.RECRUITING);
+    }
+
+    @Test
+    void rejectsActivationWithZeroRemainingOpportunities() {
+        Fixture fixture = fixtureWithSchedule(
+                RoutineGroupStatus.FULL,
+                1,
+                LocalDate.of(2026, 8, 10),
+                LocalDate.of(2026, 8, 11),
+                GroupMemberStatus.JOINED
+        );
+        Clock exactFinalDeadline = Clock.fixed(
+                Instant.parse("2026-08-11T14:00:00Z"),
+                ZoneOffset.UTC
+        );
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.activate(fixture.groupId(), exactFinalDeadline)
+        );
+
+        assertActivationUnchanged(fixture, RoutineGroupStatus.FULL);
     }
 
     @Test
@@ -223,6 +287,17 @@ class RoutineGroupActivationServiceTest {
         assertEquals(ACTIVATION_TIME, member.getParticipationStartedAt());
     }
 
+    private void assertActivationUnchanged(Fixture fixture, RoutineGroupStatus expectedGroupStatus) {
+        assertEquals(
+                expectedGroupStatus,
+                inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow().getStatus())
+        );
+        for (GroupMember member : membersById(fixture.groupId()).values()) {
+            assertEquals(GroupMemberStatus.JOINED, member.getStatus());
+            assertNull(member.getParticipationStartedAt());
+        }
+    }
+
     private Map<Long, GroupMember> membersById(Long groupId) {
         return inTransaction(() -> {
             Map<Long, GroupMember> result = new HashMap<>();
@@ -251,6 +326,45 @@ class RoutineGroupActivationServiceTest {
     }
 
     private Fixture fixture(RoutineGroupStatus groupStatus, GroupMemberStatus... memberStatuses) {
+        return fixtureWithSchedule(
+                groupStatus,
+                5,
+                LocalDate.of(2026, 8, 10),
+                LocalDate.of(2026, 8, 15),
+                memberStatuses
+        );
+    }
+
+    private Fixture fixtureWithoutSchedule(
+            RoutineGroupStatus groupStatus,
+            GroupMemberStatus... memberStatuses
+    ) {
+        return fixture(groupStatus, 5, null, null, memberStatuses);
+    }
+
+    private Fixture fixtureWithSchedule(
+            RoutineGroupStatus groupStatus,
+            int requiredCompletionCount,
+            LocalDate scheduleStart,
+            LocalDate scheduleEnd,
+            GroupMemberStatus... memberStatuses
+    ) {
+        return fixture(
+                groupStatus,
+                requiredCompletionCount,
+                scheduleStart,
+                scheduleEnd,
+                memberStatuses
+        );
+    }
+
+    private Fixture fixture(
+            RoutineGroupStatus groupStatus,
+            int requiredCompletionCount,
+            LocalDate scheduleStart,
+            LocalDate scheduleEnd,
+            GroupMemberStatus... memberStatuses
+    ) {
         return inTransaction(() -> {
             User owner = User.create();
             RoutineDefinition definition = new RoutineDefinition("물 마시기", null);
@@ -263,9 +377,20 @@ class RoutineGroupActivationServiceTest {
                     GroupVisibility.PUBLIC,
                     groupStatus,
                     10,
-                    5
+                    requiredCompletionCount
             );
             entityManager.persist(group);
+            if (scheduleStart != null) {
+                entityManager.persist(new RoutineSchedule(
+                        group,
+                        ScheduleType.DAILY,
+                        scheduleStart,
+                        scheduleEnd,
+                        LocalTime.of(23, 0),
+                        "Asia/Seoul",
+                        Set.of()
+                ));
+            }
 
             List<Long> memberIds = new ArrayList<>();
             for (int index = 0; index < memberStatuses.length; index++) {

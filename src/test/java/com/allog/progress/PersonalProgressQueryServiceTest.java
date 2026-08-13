@@ -124,9 +124,10 @@ class PersonalProgressQueryServiceTest {
                 group,
                 user,
                 GroupMemberRole.MEMBER,
-                GroupMemberStatus.ACTIVE,
+                GroupMemberStatus.JOINED,
                 Instant.parse("2026-08-01T09:00:00Z")
         );
+        member.startParticipation(Instant.parse("2026-08-01T09:00:00Z"));
         entityManager.persist(member);
         entityManager.flush();
         return new Fixture(member, schedule);
