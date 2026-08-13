@@ -55,6 +55,9 @@ public class RoutineVerification extends BaseTimeEntity {
 	@Embedded
 	private VisionAnalysisResult visionAnalysis;
 
+	@Embedded
+	private QualityCheck qualityCheck;
+
 	@Enumerated(EnumType.STRING)
 	@Column(length = 30)
 	private AiClassification aiClassification;
@@ -92,12 +95,13 @@ public class RoutineVerification extends BaseTimeEntity {
 		this.countedInScore = false;
 	}
 
-	/** STAGE7 파이프라인(중복/Vision/규칙엔진) 산출 결과를 반영한다. reviewStatus 는 AUTO_VALID/FLAGGED_FOR_REVIEW 까지만 온다. */
+	/** STAGE7 파이프라인(품질/중복/Vision/규칙엔진) 산출 결과를 반영한다. reviewStatus 는 AUTO_VALID/FLAGGED_FOR_REVIEW 까지만 온다. */
 	public void applyClassificationResult(MetadataCheck metadataCheck, VisionAnalysisResult visionAnalysis,
-			AiClassification aiClassification, ReviewStatus reviewStatus, ReviewPriority reviewPriority,
-			boolean countedInScore) {
+			QualityCheck qualityCheck, AiClassification aiClassification, ReviewStatus reviewStatus,
+			ReviewPriority reviewPriority, boolean countedInScore) {
 		this.metadataCheck = metadataCheck;
 		this.visionAnalysis = visionAnalysis;
+		this.qualityCheck = qualityCheck;
 		this.aiClassification = aiClassification;
 		this.reviewStatus = reviewStatus;
 		this.reviewPriority = reviewPriority;
@@ -169,6 +173,10 @@ public class RoutineVerification extends BaseTimeEntity {
 
 	public VisionAnalysisResult getVisionAnalysis() {
 		return visionAnalysis;
+	}
+
+	public QualityCheck getQualityCheck() {
+		return qualityCheck;
 	}
 
 	public AiClassification getAiClassification() {

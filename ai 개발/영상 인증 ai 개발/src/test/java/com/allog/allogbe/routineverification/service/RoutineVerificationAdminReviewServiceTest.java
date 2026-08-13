@@ -83,7 +83,7 @@ class RoutineVerificationAdminReviewServiceTest {
 	@Test
 	void 이미_카운트된_AUTO_VALID_건을_INVALIDATED로_확정하면_집계회수_이벤트가_발행된다() {
 		RoutineVerification verification = newVerification(LocalDateTime.of(2026, 8, 8, 8, 0));
-		verification.applyClassificationResult(verification.getMetadataCheck(), null,
+		verification.applyClassificationResult(verification.getMetadataCheck(), null, null,
 				com.allog.allogbe.routineverification.domain.AiClassification.PASS,
 				ReviewStatus.AUTO_VALID, com.allog.allogbe.routineverification.domain.ReviewPriority.NORMAL, true);
 		when(repository.findById(1L)).thenReturn(Optional.of(verification));
@@ -150,7 +150,7 @@ class RoutineVerificationAdminReviewServiceTest {
 
 	private void applyPriority(RoutineVerification verification,
 			com.allog.allogbe.routineverification.domain.ReviewPriority priority) {
-		verification.applyClassificationResult(verification.getMetadataCheck(), null,
+		verification.applyClassificationResult(verification.getMetadataCheck(), null, null,
 				com.allog.allogbe.routineverification.domain.AiClassification.REVIEW_REQUIRED,
 				ReviewStatus.FLAGGED_FOR_REVIEW, priority, false);
 	}

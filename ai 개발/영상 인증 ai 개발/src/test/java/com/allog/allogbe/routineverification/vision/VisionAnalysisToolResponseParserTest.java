@@ -25,7 +25,8 @@ class VisionAnalysisToolResponseParserTest {
 				        "relevanceScore": 0.8,
 				        "anomalyFlags": [],
 				        "confidence": 0.9,
-				        "summary": "운동 매트와 운동화가 관찰됩니다."
+				        "summary": "운동 매트와 운동화가 관찰됩니다.",
+				        "isFramedProperly": true
 				      }
 				    }
 				  ]
@@ -40,6 +41,37 @@ class VisionAnalysisToolResponseParserTest {
 		assertThat(result.getAnomalyFlags()).isEmpty();
 		assertThat(result.getConfidence()).isEqualTo(0.9);
 		assertThat(result.getSummary()).contains("운동 매트");
+		assertThat(result.getFramedProperly()).isTrue();
+		assertThat(result.getFramingIssue()).isNull();
+	}
+
+	@Test
+	void 구도_문제가_있으면_isFramedProperly와_framingIssue를_파싱한다() {
+		String responseBody = """
+				{
+				  "content": [
+				    {
+				      "type": "tool_use",
+				      "name": "report_routine_verification_analysis",
+				      "input": {
+				        "objectPresence": true,
+				        "detectedObjects": ["운동화"],
+				        "relevanceScore": 0.7,
+				        "anomalyFlags": [],
+				        "confidence": 0.6,
+				        "summary": "요약",
+				        "isFramedProperly": false,
+				        "framingIssue": "인물이 화면 절반 밖으로 잘려나감"
+				      }
+				    }
+				  ]
+				}
+				""";
+
+		VisionAnalysisResult result = parser.parse(responseBody);
+
+		assertThat(result.getFramedProperly()).isFalse();
+		assertThat(result.getFramingIssue()).isEqualTo("인물이 화면 절반 밖으로 잘려나감");
 	}
 
 	@Test
@@ -56,7 +88,8 @@ class VisionAnalysisToolResponseParserTest {
 				        "relevanceScore": 1.5,
 				        "anomalyFlags": ["워터마크 불일치"],
 				        "confidence": -0.3,
-				        "summary": "이상 징후가 관찰됩니다."
+				        "summary": "이상 징후가 관찰됩니다.",
+				        "isFramedProperly": true
 				      }
 				    }
 				  ]
@@ -134,7 +167,8 @@ class VisionAnalysisToolResponseParserTest {
 				        "relevanceScore": 0.5,
 				        "anomalyFlags": [],
 				        "confidence": 0.5,
-				        "summary": "요약"
+				        "summary": "요약",
+				        "isFramedProperly": true
 				      }
 				    }
 				  ]

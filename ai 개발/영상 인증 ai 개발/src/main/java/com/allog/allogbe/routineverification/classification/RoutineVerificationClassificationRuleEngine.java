@@ -12,12 +12,18 @@ import org.springframework.stereotype.Component;
  * ⚠️ 이 클래스는 "판정자"가 아니다 — reviewStatus 는 AUTO_VALID 또는 FLAGGED_FOR_REVIEW 까지만
  * 도달하며, VALID_CONFIRMED/INVALIDATED 로의 전환은 상호신고 + 운영자 검토(관리자 API)에서만 이뤄진다.
  *
- * 우선순위:
+ * 전체 우선순위(규칙 0~5). 규칙 0은 이 클래스가 아니라 {@link RoutineVerificationClassificationPipeline}
+ * 이 실행하지만, 판단 흐름을 온전히 보려면 여기 함께 적어둔다:
+ *  0) [파이프라인] 화질 게이트(선명도/해상도) 실패 -> AI 호출 없이 즉시 거부(예외), 아래 1~5는 실행되지 않음
  *  1) 중복(isDuplicate) -> REJECT_CANDIDATE (Vision 결과와 무관하게 최우선)
  *  2) Vision API 3회 재시도 후에도 실패(available=false) -> REVIEW_REQUIRED (사용자 귀책 아님)
  *  3) 기대 객체 미탐지(objectPresence=false) -> REJECT_CANDIDATE ("전혀 무관한 사진")
  *  4) 이상징후 존재 또는 관련성 애매(relevanceScore &lt; RELEVANCE_THRESHOLD) -> REVIEW_REQUIRED
- *  5) 그 외 -> PASS
+ *  5) 그 외, 단 구도(isFramedProperly)가 false 이면 PASS 대신 REVIEW_REQUIRED -> 아니면 PASS
+ *
+ * 구도(프레이밍) 판단은 영상 품질 확인 기능의 일부로, Vision AI(STAGE6)가 "필터" 신호로만 제공한다 —
+ * 이 값 자체가 판정을 내리지 않으며 위 5번의 PASS 조건에서만 참조된다("구도도 정상이어야 PASS").
+ * 선명도/해상도는 이 규칙엔진이 아니라 규칙 0(파이프라인의 화질 게이트)에서 이미 걸러진다.
  */
 @Component
 public class RoutineVerificationClassificationRuleEngine {
@@ -58,7 +64,8 @@ public class RoutineVerificationClassificationRuleEngine {
 		boolean hasAnomalies = vision.getAnomalyFlags() != null && !vision.getAnomalyFlags().isEmpty();
 		boolean ambiguousRelevance = vision.getRelevanceScore() == null
 				|| vision.getRelevanceScore() < RELEVANCE_THRESHOLD;
-		if (hasAnomalies || ambiguousRelevance) {
+		boolean framingIssue = Boolean.FALSE.equals(vision.getFramedProperly());
+		if (hasAnomalies || ambiguousRelevance || framingIssue) {
 			return AiClassification.REVIEW_REQUIRED;
 		}
 

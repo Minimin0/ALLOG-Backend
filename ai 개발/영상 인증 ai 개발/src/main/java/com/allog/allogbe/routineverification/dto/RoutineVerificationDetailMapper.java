@@ -1,6 +1,7 @@
 package com.allog.allogbe.routineverification.dto;
 
 import com.allog.allogbe.routineverification.domain.MetadataCheck;
+import com.allog.allogbe.routineverification.domain.QualityCheck;
 import com.allog.allogbe.routineverification.domain.RoutineVerification;
 import com.allog.allogbe.routineverification.domain.VisionAnalysisResult;
 
@@ -21,6 +22,7 @@ public final class RoutineVerificationDetailMapper {
 				verification.getSubmittedAt(),
 				toMetadataCheckResponse(verification.getMetadataCheck()),
 				toVisionAnalysisResponse(verification.getVisionAnalysis()),
+				toQualityCheckResponse(verification.getQualityCheck()),
 				verification.getAiClassification(),
 				verification.getReviewStatus(),
 				verification.getReviewPriority(),
@@ -45,6 +47,16 @@ public final class RoutineVerificationDetailMapper {
 		}
 		return new MetadataCheckResponse(
 				metadataCheck.isWithinTimeWindow(), metadataCheck.isDuplicate(), metadataCheck.getDuplicateOfId());
+	}
+
+	private static QualityCheckResponse toQualityCheckResponse(QualityCheck qualityCheck) {
+		if (qualityCheck == null) {
+			return null;
+		}
+		return new QualityCheckResponse(
+				qualityCheck.getBlurScore(), qualityCheck.isBlurry(),
+				qualityCheck.getResolutionWidth(), qualityCheck.getResolutionHeight(),
+				qualityCheck.isPassesMinResolution(), qualityCheck.isFramedProperly(), qualityCheck.getFramingIssue());
 	}
 
 	private static VisionAnalysisResponse toVisionAnalysisResponse(VisionAnalysisResult vision) {

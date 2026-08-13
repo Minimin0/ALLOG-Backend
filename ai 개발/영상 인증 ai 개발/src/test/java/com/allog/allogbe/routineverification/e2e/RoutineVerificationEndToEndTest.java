@@ -84,11 +84,15 @@ class RoutineVerificationEndToEndTest {
 				new ChallengeVisionContext(ChallengeCategory.EXERCISE, "운동 인증", List.of("운동화")));
 	}
 
+	/** 500x500 고대비 체커보드 — 새 화질 게이트(최소 해상도 480px, 선명도)를 통과하도록 크고 또렷하게 만든다. */
 	private byte[] jpegBytes(int seed) throws IOException {
-		BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB);
-		for (int y = 0; y < 16; y++) {
-			for (int x = 0; x < 16; x++) {
-				int gray = ((x + y + seed) * 15) % 256;
+		int size = 500;
+		int blockSize = 10;
+		BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
+		for (int y = 0; y < size; y++) {
+			for (int x = 0; x < size; x++) {
+				boolean black = ((x / blockSize) + (y / blockSize) + seed) % 2 == 0;
+				int gray = black ? 10 : 240;
 				image.setRGB(x, y, (gray << 16) | (gray << 8) | gray);
 			}
 		}
@@ -112,6 +116,21 @@ class RoutineVerificationEndToEndTest {
 		return restTemplate.postForEntity(
 				"/api/v1/challenges/{challengeId}/verifications", request,
 				RoutineVerificationSubmitResponse.class, challengeId);
+	}
+
+	/** 500x500 이지만 대비가 거의 없는 매끈한 이미지 — 화질 게이트에서 흐린 이미지로 걸러져야 한다. */
+	private byte[] blurryJpegBytes() throws IOException {
+		int size = 500;
+		BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
+		for (int y = 0; y < size; y++) {
+			for (int x = 0; x < size; x++) {
+				int gray = 128 + (int) (2 * Math.sin(x / 400.0) + 2 * Math.cos(y / 400.0));
+				image.setRGB(x, y, (gray << 16) | (gray << 8) | gray);
+			}
+		}
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ImageIO.write(image, "jpg", out);
+		return out.toByteArray();
 	}
 
 	private ByteArrayResource namedResource(byte[] bytes, String filename) {
@@ -242,6 +261,32 @@ class RoutineVerificationEndToEndTest {
 		RoutineVerificationDetailResponse detail = getDetail(id);
 		assertThat(detail.reviewStatus()).isEqualTo(ReviewStatus.FLAGGED_FOR_REVIEW);
 		assertThat(visionClient.callCount()).isZero();
+	}
+
+	@Test
+	void 케이스7_흐린_이미지는_422_LOW_QUALITY_BLUR로_즉시_거부되고_중복검사와_AI가_호출되지_않는다() throws IOException {
+		ResponseEntity<String> response = restTemplateRawPost(DEFAULT_CHALLENGE_ID, blurryJpegBytes());
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+		assertThat(response.getBody()).contains("LOW_QUALITY_BLUR");
+		assertThat(visionClient.callCount()).isZero();
+	}
+
+	@Test
+	void 케이스8_구도가_잘못되었다고_판단되면_REVIEW_REQUIRED_NORMAL로_귀결된다() throws IOException {
+		visionClient.respondWith(new VisionAnalysisResult(
+				true, List.of("운동화"), 0.9, List.of(), 0.8, "운동화가 화면 절반만 보입니다.",
+				false, "인물이 화면 밖으로 크게 잘려나가 있습니다."));
+
+		ResponseEntity<RoutineVerificationSubmitResponse> submitResponse =
+				submitPhoto(DEFAULT_CHALLENGE_ID, jpegBytes(8));
+		Long id = submitResponse.getBody().verificationId();
+
+		RoutineVerificationDetailResponse detail = getDetail(id);
+		assertThat(detail.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
+		assertThat(detail.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(detail.qualityCheck().isFramedProperly()).isFalse();
+		assertThat(detail.qualityCheck().framingIssue()).contains("잘려나가");
 	}
 
 	private ResponseEntity<String> restTemplateRawPost(Long challengeId, byte[] photoBytes) {

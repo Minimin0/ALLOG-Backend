@@ -2,6 +2,7 @@ package com.allog.allogbe.routineverification.classification;
 
 import com.allog.allogbe.routineverification.domain.AiClassification;
 import com.allog.allogbe.routineverification.domain.MetadataCheck;
+import com.allog.allogbe.routineverification.domain.QualityCheck;
 import com.allog.allogbe.routineverification.domain.ReviewPriority;
 import com.allog.allogbe.routineverification.domain.ReviewStatus;
 import com.allog.allogbe.routineverification.domain.SubmissionType;
@@ -12,7 +13,9 @@ import com.allog.allogbe.routineverification.duplicate.PerceptualHash;
 import com.allog.allogbe.routineverification.duplicate.PerceptualHashCalculator;
 import com.allog.allogbe.routineverification.duplicate.RoutineVerificationDuplicateDetector;
 import com.allog.allogbe.routineverification.exception.DisallowedSubmissionTypeException;
+import com.allog.allogbe.routineverification.exception.LowQualityMediaException;
 import com.allog.allogbe.routineverification.exception.OutsideVerificationTimeWindowException;
+import com.allog.allogbe.routineverification.media.ImageQualityAnalyzer;
 import com.allog.allogbe.routineverification.service.RoutineVerificationSubmissionGate;
 import com.allog.allogbe.routineverification.vision.ChallengeCategory;
 import com.allog.allogbe.routineverification.vision.RoutineVerificationVisionAnalysisService;
@@ -46,6 +49,8 @@ class RoutineVerificationClassificationPipelineTest {
 	@Mock
 	private RoutineVerificationSubmissionGate gate;
 	@Mock
+	private ImageQualityAnalyzer qualityAnalyzer;
+	@Mock
 	private PerceptualHashCalculator hashCalculator;
 	@Mock
 	private RoutineVerificationDuplicateDetector duplicateDetector;
@@ -66,7 +71,12 @@ class RoutineVerificationClassificationPipelineTest {
 	void setUp() {
 		RoutineVerificationClassificationRuleEngine ruleEngine = new RoutineVerificationClassificationRuleEngine();
 		pipeline = new RoutineVerificationClassificationPipeline(
-				gate, hashCalculator, duplicateDetector, visionAnalysisService, ruleEngine);
+				gate, qualityAnalyzer, hashCalculator, duplicateDetector, visionAnalysisService, ruleEngine);
+		org.mockito.Mockito.lenient().when(qualityAnalyzer.analyze(any())).thenReturn(sharpHighResQualityCheck());
+	}
+
+	private QualityCheck sharpHighResQualityCheck() {
+		return new QualityCheck(500f, false, 1080, 1080, true, null, null);
 	}
 
 	@Test
@@ -162,5 +172,50 @@ class RoutineVerificationClassificationPipelineTest {
 				.isInstanceOf(DisallowedSubmissionTypeException.class);
 
 		verifyNoInteractions(duplicateDetector, visionAnalysisService);
+	}
+
+	@Test
+	void 케이스7_흐린_이미지는_LOW_QUALITY_BLUR로_즉시_거부되고_중복검사와_AI_호출이_발생하지_않는다() {
+		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
+		when(qualityAnalyzer.analyze(any())).thenReturn(new QualityCheck(10f, true, 1080, 1080, true, null, null));
+
+		assertThatThrownBy(() -> pipeline.process(input))
+				.isInstanceOf(LowQualityMediaException.class)
+				.satisfies(e -> assertThat(((LowQualityMediaException) e).getReasonCode())
+						.isEqualTo("LOW_QUALITY_BLUR"));
+
+		verifyNoInteractions(hashCalculator, duplicateDetector, visionAnalysisService);
+	}
+
+	@Test
+	void 케이스8_저해상도_이미지는_LOW_RESOLUTION으로_즉시_거부되고_중복검사와_AI_호출이_발생하지_않는다() {
+		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
+		when(qualityAnalyzer.analyze(any())).thenReturn(new QualityCheck(500f, false, 100, 100, false, null, null));
+
+		assertThatThrownBy(() -> pipeline.process(input))
+				.isInstanceOf(LowQualityMediaException.class)
+				.satisfies(e -> assertThat(((LowQualityMediaException) e).getReasonCode())
+						.isEqualTo("LOW_RESOLUTION"));
+
+		verifyNoInteractions(hashCalculator, duplicateDetector, visionAnalysisService);
+	}
+
+	@Test
+	void 케이스9_품질은_정상인데_관련성이_낮은_복합_케이스는_규칙0을_건너뛰고_기존_규칙대로_REVIEW_REQUIRED다() {
+		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
+		// qualityAnalyzer 는 @BeforeEach 기본 스텁(선명함/고해상도)을 그대로 사용 -> 규칙 0은 통과(건너뜀)
+		when(hashCalculator.calculate(any())).thenReturn(new PerceptualHash(1L));
+		when(duplicateDetector.detect(any(), any(), any(), any())).thenReturn(DuplicateCheckResult.notDuplicate());
+		when(visionAnalysisService.analyze(any())).thenReturn(VisionAnalysisOutcome.success(
+				new VisionAnalysisResult(true, List.of("운동화"), 0.3, List.of(), 0.6, "관련성이 낮음")));
+
+		RoutineVerificationClassificationOutput output = pipeline.process(input);
+
+		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
+		assertThat(output.decision().reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(output.qualityCheck().isBlurry()).isFalse();
+		assertThat(output.qualityCheck().isPassesMinResolution()).isTrue();
+		verify(hashCalculator, times(1)).calculate(any());
+		verify(visionAnalysisService, times(1)).analyze(any());
 	}
 }

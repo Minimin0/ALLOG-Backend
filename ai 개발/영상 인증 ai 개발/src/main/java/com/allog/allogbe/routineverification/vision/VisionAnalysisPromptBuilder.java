@@ -32,7 +32,7 @@ public final class VisionAnalysisPromptBuilder {
 				- 카테고리: %s
 				- 루틴 설명: %s
 				- 기대 객체 목록: %s
-
+				%s
 				[분석 대상]
 				첨부된 이미지는 사용자가 위 루틴을 수행했다며 제출한 인증 사진(또는 영상에서
 				추출한 대표 프레임)입니다.
@@ -46,11 +46,38 @@ public final class VisionAnalysisPromptBuilder {
 				  이상 징후의 종류 (없으면 빈 배열)
 				- confidence: 위 분석 전반에 대한 당신의 확신도 (0.0~1.0)
 				- summary: 관찰 내용을 1~2문장으로 객관적으로 요약하세요 (판정 표현 금지)
+				- isFramedProperly: 피사체(수행 중인 루틴의 인물/제품/객체)가 프레임 안에 온전히
+				  담겨 있는지 여부. 화면 밖으로 크게 잘려나갔거나 너무 멀리/작게 찍혀 식별이 어려우면 false
+				- framingIssue: isFramedProperly가 false인 경우에만 문제를 1문장으로 설명하세요
+				  (true인 경우 비워두세요)
+
+				⚠️ 선명도(흐림/블러) 여부는 이미 별도의 결정론적 알고리즘으로 검증이 끝났습니다.
+				이 항목을 다시 판단하거나 언급하지 마세요 — 구도(프레이밍)만 판단하세요.
 				"""
 				.formatted(
 						request.category(),
 						request.routineDescription(),
 						expectedObjectsText,
+						categoryGuidance(request.category()),
 						VisionAnalysisToolSchema.TOOL_NAME);
+	}
+
+	/**
+	 * 카테고리별 예외 규칙. SLEEP은 폰 화면(알람/수면 트래커 앱)을 촬영하거나 캡처한 이미지가
+	 * 정상적인 인증 형태이므로, "화면 재촬영" 자체를 이상 징후로 오판하지 않도록 명시한다.
+	 * (STAGE7 캘리브레이션에서 실제 오탐은 재현되지 않았으나, 표본이 2장뿐이라 예방적으로 추가했다.)
+	 */
+	private static String categoryGuidance(ChallengeCategory category) {
+		if (category == ChallengeCategory.SLEEP) {
+			return """
+
+					⚠️ 카테고리 특이사항(SLEEP): 이 카테고리는 스마트폰의 알람/수면 트래커 앱 화면을
+					촬영하거나 캡처한 이미지가 정상적이고 기대되는 인증 형태입니다. 화면을 촬영/캡처했다는
+					사실 자체만으로는 anomalyFlags에 이상 징후로 포함시키지 마세요. 다만 합성/편집 흔적,
+					실제 앱 UI로 보기 어려운 디자인 목업·일러스트 특징, 시각 조작 흔적처럼 화면 캡처
+					여부와 무관한 별도의 이상 신호가 관찰되면 그 근거를 구체적으로 남겨 보고하세요.
+					""";
+		}
+		return "";
 	}
 }

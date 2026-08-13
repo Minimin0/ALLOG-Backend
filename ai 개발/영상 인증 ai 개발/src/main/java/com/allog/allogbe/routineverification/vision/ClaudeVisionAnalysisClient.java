@@ -135,10 +135,12 @@ public class ClaudeVisionAnalysisClient implements VisionAnalysisClient {
 		confidence.put("maximum", 1);
 
 		properties.putObject("summary").put("type", "string");
+		properties.putObject("isFramedProperly").put("type", "boolean");
+		properties.putObject("framingIssue").put("type", "string");
 
 		ArrayNode required = schema.putArray("required");
 		required.add("objectPresence").add("detectedObjects").add("relevanceScore")
-				.add("anomalyFlags").add("confidence").add("summary");
+				.add("anomalyFlags").add("confidence").add("summary").add("isFramedProperly");
 
 		return schema;
 	}

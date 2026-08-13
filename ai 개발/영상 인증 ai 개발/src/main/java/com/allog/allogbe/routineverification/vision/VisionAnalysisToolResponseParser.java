@@ -44,7 +44,8 @@ public class VisionAnalysisToolResponseParser {
 				|| !input.hasNonNull("relevanceScore")
 				|| !input.has("anomalyFlags")
 				|| !input.hasNonNull("confidence")
-				|| !input.hasNonNull("summary")) {
+				|| !input.hasNonNull("summary")
+				|| !input.hasNonNull("isFramedProperly")) {
 			throw new VisionAnalysisAttemptException("Vision API 응답에 필수 필드가 누락되었습니다: " + input);
 		}
 
@@ -55,9 +56,11 @@ public class VisionAnalysisToolResponseParser {
 			List<String> anomalyFlags = toStringList(input.get("anomalyFlags"));
 			double confidence = clamp01(input.get("confidence").asDouble());
 			String summary = input.get("summary").asText();
+			boolean framedProperly = input.get("isFramedProperly").asBoolean();
+			String framingIssue = input.hasNonNull("framingIssue") ? input.get("framingIssue").asText() : null;
 
-			return new VisionAnalysisResult(
-					objectPresence, detectedObjects, relevanceScore, anomalyFlags, confidence, summary);
+			return new VisionAnalysisResult(objectPresence, detectedObjects, relevanceScore, anomalyFlags,
+					confidence, summary, framedProperly, framingIssue);
 		} catch (RuntimeException e) {
 			throw new VisionAnalysisAttemptException("Vision API 응답 필드 타입이 예상과 다릅니다: " + input, e);
 		}

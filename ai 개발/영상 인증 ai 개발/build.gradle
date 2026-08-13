@@ -30,3 +30,12 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// STAGE7 임계치 캘리브레이션 전용 일회성 도구 실행. ANTHROPIC_API_KEY 환경변수 필요, 실제 API 호출함.
+tasks.register('runCalibration', JavaExec) {
+	group = 'verification'
+	description = 'Run calibration-images/ through the real STAGE6 Vision pipeline (needs ANTHROPIC_API_KEY).'
+	mainClass = 'com.allog.allogbe.tools.calibration.CalibrationRunner'
+	classpath = sourceSets.main.runtimeClasspath
+	systemProperty 'file.encoding', 'UTF-8'
+}

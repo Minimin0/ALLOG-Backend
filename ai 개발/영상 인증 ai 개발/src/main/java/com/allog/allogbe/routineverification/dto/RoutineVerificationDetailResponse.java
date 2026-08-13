@@ -18,6 +18,7 @@ public record RoutineVerificationDetailResponse(
 		LocalDateTime submittedAt,
 		MetadataCheckResponse metadataCheck,
 		VisionAnalysisResponse visionAnalysis,
+		QualityCheckResponse qualityCheck,
 		AiClassification aiClassification,
 		ReviewStatus reviewStatus,
 		ReviewPriority reviewPriority,

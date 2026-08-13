@@ -106,7 +106,7 @@ public class RoutineVerificationSubmissionService {
 		RoutineVerificationClassificationOutput output = pipeline.process(input);
 
 		verification.applyClassificationResult(
-				output.metadataCheck(), output.visionAnalysis(),
+				output.metadataCheck(), output.visionAnalysis(), output.qualityCheck(),
 				output.decision().aiClassification(), output.decision().reviewStatus(),
 				output.decision().reviewPriority(), output.decision().countedInScore());
 		repository.save(verification);
@@ -115,7 +115,7 @@ public class RoutineVerificationSubmissionService {
 
 	private void applyFallback(RoutineVerification verification) {
 		verification.applyClassificationResult(
-				verification.getMetadataCheck(), null,
+				verification.getMetadataCheck(), null, null,
 				AiClassification.REVIEW_REQUIRED, ReviewStatus.FLAGGED_FOR_REVIEW, ReviewPriority.NORMAL, false);
 		repository.save(verification);
 		publishClassificationEvents(verification);

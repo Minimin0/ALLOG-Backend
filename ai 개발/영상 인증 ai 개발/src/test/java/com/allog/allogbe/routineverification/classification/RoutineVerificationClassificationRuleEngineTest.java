@@ -21,6 +21,11 @@ class RoutineVerificationClassificationRuleEngineTest {
 				new VisionAnalysisResult(objectPresence, List.of("객체"), relevanceScore, anomalyFlags, 0.9, "요약"));
 	}
 
+	private VisionAnalysisOutcome visionWithFraming(boolean framedProperly, String framingIssue) {
+		return VisionAnalysisOutcome.success(new VisionAnalysisResult(
+				true, List.of("객체"), 0.9, List.of(), 0.9, "요약", framedProperly, framingIssue));
+	}
+
 	@Test
 	void 중복이면_Vision_결과와_무관하게_REJECT_CANDIDATE_HIGH이다() {
 		ClassificationDecision decision = ruleEngine.classify(true, VisionAnalysisOutcome.unavailable());
@@ -78,5 +83,14 @@ class RoutineVerificationClassificationRuleEngineTest {
 		assertThat(decision.reviewStatus()).isEqualTo(ReviewStatus.AUTO_VALID);
 		assertThat(decision.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
 		assertThat(decision.countedInScore()).isTrue();
+	}
+
+	@Test
+	void 구도가_잘못되었다고_판단되면_다른_지표가_전부_좋아도_REVIEW_REQUIRED_NORMAL이다() {
+		ClassificationDecision decision = ruleEngine.classify(false,
+				visionWithFraming(false, "인물이 화면 절반 밖으로 잘려나감"));
+
+		assertThat(decision.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
+		assertThat(decision.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
 	}
 }

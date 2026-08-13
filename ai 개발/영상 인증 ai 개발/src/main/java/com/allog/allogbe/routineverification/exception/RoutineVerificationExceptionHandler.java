@@ -22,6 +22,12 @@ public class RoutineVerificationExceptionHandler {
 				.body(new RoutineVerificationErrorResponse("OUTSIDE_VERIFICATION_TIME_WINDOW", e.getMessage()));
 	}
 
+	@ExceptionHandler(LowQualityMediaException.class)
+	public ResponseEntity<RoutineVerificationErrorResponse> handleLowQualityMedia(LowQualityMediaException e) {
+		return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+				.body(new RoutineVerificationErrorResponse(e.getReasonCode(), e.getMessage()));
+	}
+
 	@ExceptionHandler(RoutineVerificationNotFoundException.class)
 	public ResponseEntity<RoutineVerificationErrorResponse> handleNotFound(RoutineVerificationNotFoundException e) {
 		return ResponseEntity.status(HttpStatus.NOT_FOUND)

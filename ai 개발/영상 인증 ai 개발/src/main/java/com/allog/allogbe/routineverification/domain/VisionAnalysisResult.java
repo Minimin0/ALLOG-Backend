@@ -31,17 +31,36 @@ public class VisionAnalysisResult {
 	@Column(columnDefinition = "TEXT")
 	private String summary;
 
+	/**
+	 * 영상 품질 확인 중 구도(프레이밍) 판단. 선명도는 STAGE4 알고리즘 게이트가 이미 처리하므로 여기서
+	 * 다시 묻지 않는다. QualityCheck 도 같은 테이블에 임베드되므로 컬럼명이 겹치지 않도록 접두어를 둔다.
+	 */
+	@Column(name = "vision_framed_properly")
+	private Boolean framedProperly;
+
+	@Column(name = "vision_framing_issue", columnDefinition = "TEXT")
+	private String framingIssue;
+
 	protected VisionAnalysisResult() {
 	}
 
+	/** 프레이밍 판단이 없던 기존 호출부와의 호환을 위한 생성자. framedProperly/framingIssue 는 null 이 된다. */
 	public VisionAnalysisResult(Boolean objectPresence, List<String> detectedObjects, Double relevanceScore,
 			List<String> anomalyFlags, Double confidence, String summary) {
+		this(objectPresence, detectedObjects, relevanceScore, anomalyFlags, confidence, summary, null, null);
+	}
+
+	public VisionAnalysisResult(Boolean objectPresence, List<String> detectedObjects, Double relevanceScore,
+			List<String> anomalyFlags, Double confidence, String summary,
+			Boolean framedProperly, String framingIssue) {
 		this.objectPresence = objectPresence;
 		this.detectedObjects = detectedObjects;
 		this.relevanceScore = relevanceScore;
 		this.anomalyFlags = anomalyFlags;
 		this.confidence = confidence;
 		this.summary = summary;
+		this.framedProperly = framedProperly;
+		this.framingIssue = framingIssue;
 	}
 
 	public Boolean getObjectPresence() {
@@ -66,5 +85,13 @@ public class VisionAnalysisResult {
 
 	public String getSummary() {
 		return summary;
+	}
+
+	public Boolean getFramedProperly() {
+		return framedProperly;
+	}
+
+	public String getFramingIssue() {
+		return framingIssue;
 	}
 }

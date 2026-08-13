@@ -87,7 +87,7 @@ class RoutineVerificationSubmissionServiceTest {
 		when(visionContextProvider.getContext(1L)).thenReturn(
 				new ChallengeVisionContext(ChallengeCategory.EXERCISE, "운동 인증", List.of("운동화")));
 		when(pipeline.process(any())).thenReturn(new RoutineVerificationClassificationOutput(
-				new MetadataCheck(true, false, null), null,
+				new MetadataCheck(true, false, null), null, null,
 				new ClassificationDecision(AiClassification.PASS, ReviewStatus.AUTO_VALID, ReviewPriority.NORMAL, true)));
 
 		RoutineVerificationSubmitResponse response = service.submit(command);

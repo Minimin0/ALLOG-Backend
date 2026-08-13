@@ -36,7 +36,7 @@ class RoutineVerificationInsightsQueryServiceTest {
 	void 최근_제출_이력을_요약_모델로_변환한다() {
 		RoutineVerification verification = new RoutineVerification(100L, 1L, 200L, SubmissionType.PHOTO,
 				"https://x.jpg", LocalDateTime.of(2026, 8, 8, 8, 0), new MetadataCheck(true, false, null));
-		verification.applyClassificationResult(verification.getMetadataCheck(), null,
+		verification.applyClassificationResult(verification.getMetadataCheck(), null, null,
 				AiClassification.PASS, ReviewStatus.AUTO_VALID, ReviewPriority.NORMAL, true);
 
 		when(repository.findTop20ByUserIdOrderBySubmittedAtDesc(100L)).thenReturn(List.of(verification));
