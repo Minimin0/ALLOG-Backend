@@ -8,6 +8,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Clock;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,5 +30,6 @@ class AllogApplicationTests {
     void contextLoads() {
         assertFalse(provider.isAvailable());
         assertTrue(applicationContext.getBeansOfType(AiCoachPreviewController.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(Clock.class).size() == 1);
     }
 }

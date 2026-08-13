@@ -13,6 +13,7 @@ import java.util.Optional;
 
 public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> {
 
+    @EntityGraph(attributePaths = "routineGroup")
     Optional<GroupMember> findByRoutineGroup_IdAndUser_Id(Long routineGroupId, Long userId);
 
     @EntityGraph(attributePaths = {"routineGroup", "routineGroup.routineDefinition"})
@@ -24,6 +25,7 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
 
     List<GroupMember> findAllByRoutineGroup_Id(Long routineGroupId);
 
+    @EntityGraph(attributePaths = "routineGroup")
     List<GroupMember> findAllByRoutineGroup_IdAndParticipationStartedAtIsNotNull(Long routineGroupId);
 
     @EntityGraph(attributePaths = {"routineGroup", "routineGroup.routineDefinition"})

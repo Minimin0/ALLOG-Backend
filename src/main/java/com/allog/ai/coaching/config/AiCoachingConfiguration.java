@@ -16,12 +16,7 @@ import java.time.Clock;
 public class AiCoachingConfiguration {
 
     @Bean
-    Clock aiCoachClock() {
-        return Clock.systemUTC();
-    }
-
-    @Bean
-    AiCoachApplicationService aiCoachApplicationService(AiCoachService coachService, Clock aiCoachClock) {
+    AiCoachApplicationService aiCoachApplicationService(AiCoachService coachService, Clock clock) {
         return new AiCoachApplicationService(
                 new ProgressAnalyzer(),
                 new ProgressInsightDetector(),
@@ -29,7 +24,7 @@ public class AiCoachingConfiguration {
                 new RoutineStateResolver(),
                 coachService,
                 AiCoachPolicy.defaults(),
-                aiCoachClock
+                clock
         );
     }
 }
