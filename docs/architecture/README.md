@@ -8,5 +8,6 @@
 - [Group Progress and Participation Completion](group-progress-completion.md)
 - [Membership Lifecycle and Group Activation](membership-lifecycle.md)
 - [Production AI Coach Application](production-ai-coach.md)
+- [Verification AI Criteria and Observation Contract](verification-ai-criteria.md)
 
-인증, 도메인 경계, 외부 연동 구조는 설계 확정 후 추가합니다.
+확정되지 않은 Product 정책은 각 문서에서 구현 계약과 분리합니다.

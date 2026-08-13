@@ -1,7 +1,9 @@
 package com.allog.verification.analysis.service;
 
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -123,13 +125,17 @@ class VerificationAnalysisWorkerTest {
     private VerificationAnalysisSuccessResult successResult() {
         return new VerificationAnalysisSuccessResult(
                 AnalysisRecommendation.PASS,
-                "synthetic-reason",
-                "synthetic-model",
-                "synthetic-criteria",
-                true,
-                new BigDecimal("0.7500"),
-                false,
-                true
+                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+                new VerificationAnalysisProvider.Result(
+                        "synthetic-model",
+                        new VerificationAnalysisObservation(
+                                true,
+                                new BigDecimal("0.7500"),
+                                false,
+                                true,
+                                VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                        )
+                )
         );
     }
 }

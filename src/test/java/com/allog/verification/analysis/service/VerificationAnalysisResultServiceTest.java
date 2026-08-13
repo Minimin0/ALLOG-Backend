@@ -1,9 +1,11 @@
 package com.allog.verification.analysis.service;
 
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
@@ -59,9 +61,9 @@ class VerificationAnalysisResultServiceTest {
         assertAll(
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, fixture.analysis().getStatus()),
                 () -> assertEquals(AnalysisRecommendation.PASS, fixture.analysis().getRecommendation()),
-                () -> assertEquals("synthetic-reason", fixture.analysis().getReasonCode()),
+                () -> assertEquals("OBSERVATION_COMPLETE", fixture.analysis().getReasonCode()),
                 () -> assertEquals("synthetic-model", fixture.analysis().getProviderModel()),
-                () -> assertEquals("synthetic-criteria", fixture.analysis().getCriteriaVersion()),
+                () -> assertEquals("TEST_EVIDENCE@1", fixture.analysis().getCriteriaVersion()),
                 () -> assertEquals(Instant.parse("2026-08-14T00:00:30.123456Z"), fixture.analysis().getCompletedAt()),
                 () -> assertEquals(1, fixture.analysis().getAttemptCount()),
                 () -> assertEquals(ATTEMPT_STARTED_AT, fixture.analysis().getLastAttemptAt()),
@@ -188,13 +190,17 @@ class VerificationAnalysisResultServiceTest {
     private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {
         return new VerificationAnalysisSuccessResult(
                 recommendation,
-                "synthetic-reason",
-                "synthetic-model",
-                "synthetic-criteria",
-                true,
-                new BigDecimal("0.7500"),
-                false,
-                true
+                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+                new VerificationAnalysisProvider.Result(
+                        "synthetic-model",
+                        new VerificationAnalysisObservation(
+                                true,
+                                new BigDecimal("0.7500"),
+                                false,
+                                true,
+                                VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                        )
+                )
         );
     }
 

@@ -1,7 +1,8 @@
 package com.allog.verification.analysis.service;
 
-import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.storage.VerificationMediaStorage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,11 +11,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
+import java.util.Set;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +48,8 @@ class VerificationAnalysisMediaProcessorTest {
                     INPUT.contentType(),
                     new byte[]{1, 2, 3, 4}
             );
+    private static final VerificationCriteria CRITERIA = criteria(VerificationCriteria.MediaModality.VIDEO);
+    private static final VerificationAnalysisProvider.Result PROVIDER_RESULT = providerResult();
 
     @Mock
     private VerificationAnalysisInputLoader inputLoader;
@@ -54,24 +61,30 @@ class VerificationAnalysisMediaProcessorTest {
     private VerificationAnalysisProvider provider;
 
     @Test
-    void loadsAcquiresValidatesAndCallsProviderWithoutTransaction() {
-        VerificationAnalysisProcessor.Outcome expected = new VerificationAnalysisProcessor.Success(successResult());
+    void loadsAcquiresValidatesAndCallsProviderWithMinimizedEvidenceOutsideTransaction() {
         when(inputLoader.load(CLAIM)).thenReturn(INPUT);
         when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes())).thenAnswer(invocation -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             return MEDIA;
         });
-        when(provider.analyze(INPUT, MEDIA)).thenAnswer(invocation -> {
+        when(provider.analyze(eq(CRITERIA.providerContract()), any())).thenAnswer(invocation -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
-            return expected;
+            VerificationAnalysisProvider.Evidence evidence = invocation.getArgument(1);
+            assertEquals(VerificationCriteria.MediaModality.VIDEO, evidence.modality());
+            assertEquals("video/mp4", evidence.contentType());
+            assertArrayEquals(new byte[]{1, 2, 3, 4}, evidence.content());
+            return PROVIDER_RESULT;
         });
 
-        assertEquals(expected, processor().process(CLAIM));
-        verify(provider).analyze(INPUT, MEDIA);
+        assertEquals(
+                new VerificationAnalysisMediaProcessor.Observed(CRITERIA, PROVIDER_RESULT),
+                processor().process(CLAIM, CRITERIA)
+        );
+        verify(provider).analyze(eq(CRITERIA.providerContract()), any());
     }
 
     @Test
-    void mapsInvalidMediaToBadRequestWithoutProviderCall() {
+    void mapsInvalidOrUnsupportedMediaToBadRequestWithoutProviderCall() {
         when(inputLoader.load(CLAIM)).thenReturn(INPUT);
         when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes()))
                 .thenReturn(new VerificationMediaStorage.StoredMedia(
@@ -79,10 +92,15 @@ class VerificationAnalysisMediaProcessorTest {
                         INPUT.sizeBytes() + 1,
                         INPUT.contentType(),
                         new byte[]{1, 2, 3, 4, 5}
-                ));
+                ))
+                .thenReturn(MEDIA);
 
-        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
-        verify(provider, never()).analyze(INPUT, MEDIA);
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM, CRITERIA));
+        assertFailure(
+                VerificationAnalysisFailureCode.BAD_REQUEST,
+                processor().process(CLAIM, criteria(VerificationCriteria.MediaModality.PHOTO))
+        );
+        verify(provider, never()).analyze(any(), any());
     }
 
     @Test
@@ -94,8 +112,29 @@ class VerificationAnalysisMediaProcessorTest {
                         "unavailable"
                 ));
 
-        assertFailure(VerificationAnalysisFailureCode.NETWORK, processor().process(CLAIM));
-        verify(provider, never()).analyze(INPUT, MEDIA);
+        assertFailure(VerificationAnalysisFailureCode.NETWORK, processor().process(CLAIM, CRITERIA));
+        verify(provider, never()).analyze(any(), any());
+    }
+
+    @Test
+    void rejectsCompleteObservationMissingCriteriaRequiredValues() {
+        when(inputLoader.load(CLAIM)).thenReturn(INPUT);
+        when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes())).thenReturn(MEDIA);
+        when(provider.analyze(any(), any())).thenReturn(new VerificationAnalysisProvider.Result(
+                "synthetic-model",
+                new VerificationAnalysisObservation(
+                        true,
+                        null,
+                        false,
+                        true,
+                        VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                )
+        ));
+
+        assertFailure(
+                VerificationAnalysisFailureCode.INVALID_RESPONSE,
+                processor().process(CLAIM, CRITERIA)
+        );
     }
 
     @Test
@@ -113,24 +152,24 @@ class VerificationAnalysisMediaProcessorTest {
                 .thenThrow(missing)
                 .thenThrow(configuration)
                 .thenReturn(MEDIA);
-        when(provider.analyze(INPUT, MEDIA)).thenThrow(new IllegalStateException("unexpected"));
+        when(provider.analyze(any(), any())).thenThrow(new IllegalStateException("unexpected"));
 
         assertEquals(missing, assertThrows(
                 VerificationMediaStorage.StorageException.class,
-                () -> processor().process(CLAIM)
+                () -> processor().process(CLAIM, CRITERIA)
         ));
         assertEquals(configuration, assertThrows(
                 VerificationMediaStorage.StorageException.class,
-                () -> processor().process(CLAIM)
+                () -> processor().process(CLAIM, CRITERIA)
         ));
-        assertThrows(IllegalStateException.class, () -> processor().process(CLAIM));
+        assertThrows(IllegalStateException.class, () -> processor().process(CLAIM, CRITERIA));
     }
 
     @Test
     void rejectsExecutionInsideCallerTransaction() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         try {
-            assertThrows(IllegalStateException.class, () -> processor().process(CLAIM));
+            assertThrows(IllegalStateException.class, () -> processor().process(CLAIM, CRITERIA));
         } finally {
             TransactionSynchronizationManager.setActualTransactionActive(false);
         }
@@ -142,22 +181,38 @@ class VerificationAnalysisMediaProcessorTest {
 
     private void assertFailure(
             VerificationAnalysisFailureCode expected,
-            VerificationAnalysisProcessor.Outcome outcome
+            VerificationAnalysisMediaProcessor.Outcome outcome
     ) {
-        VerificationAnalysisProcessor.Failure failure = (VerificationAnalysisProcessor.Failure) outcome;
+        VerificationAnalysisMediaProcessor.Failure failure =
+                (VerificationAnalysisMediaProcessor.Failure) outcome;
         assertEquals(expected, failure.failureCode());
     }
 
-    private VerificationAnalysisSuccessResult successResult() {
-        return new VerificationAnalysisSuccessResult(
-                AnalysisRecommendation.PASS,
-                "synthetic-reason",
+    private static VerificationCriteria criteria(VerificationCriteria.MediaModality modality) {
+        return new VerificationCriteria(
+                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+                20L,
+                Set.of(modality),
+                Set.of(
+                        VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,
+                        VerificationCriteria.ObservationType.CRITERIA_RELEVANCE_SCORE,
+                        VerificationCriteria.ObservationType.INTEGRITY_ANOMALY,
+                        VerificationCriteria.ObservationType.FRAMING_SUFFICIENCY
+                ),
+                "Test-only evidence requirements"
+        );
+    }
+
+    private static VerificationAnalysisProvider.Result providerResult() {
+        return new VerificationAnalysisProvider.Result(
                 "synthetic-model",
-                "synthetic-criteria",
-                true,
-                new BigDecimal("0.7500"),
-                false,
-                true
+                new VerificationAnalysisObservation(
+                        true,
+                        new BigDecimal("0.7500"),
+                        false,
+                        true,
+                        VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                )
         );
     }
 }

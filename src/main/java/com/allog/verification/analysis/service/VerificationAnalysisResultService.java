@@ -34,15 +34,17 @@ public class VerificationAnalysisResultService {
         }
 
         Instant completedAt = VerificationAnalysisTime.snapshot(clock);
+        var providerResult = result.providerResult();
+        var observation = providerResult.observation();
         analysis.succeed(
                 result.recommendation(),
-                result.reasonCode(),
-                result.providerModel(),
-                result.criteriaVersion(),
-                result.objectPresence(),
-                result.relevanceScore(),
-                result.anomalyDetected(),
-                result.framedProperly(),
+                observation.reasonCode().name(),
+                providerResult.providerModel(),
+                result.criteriaReference().storageValue(),
+                observation.objectPresence(),
+                observation.relevanceScore(),
+                observation.anomalyDetected(),
+                observation.framedProperly(),
                 completedAt
         );
         return true;

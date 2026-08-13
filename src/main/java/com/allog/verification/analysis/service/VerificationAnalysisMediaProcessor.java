@@ -1,13 +1,15 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Objects;
 
-public final class VerificationAnalysisMediaProcessor implements VerificationAnalysisProcessor {
+public final class VerificationAnalysisMediaProcessor {
 
     private final VerificationAnalysisInputLoader inputLoader;
     private final VerificationMediaStorage storage;
@@ -23,8 +25,8 @@ public final class VerificationAnalysisMediaProcessor implements VerificationAna
         this.provider = Objects.requireNonNull(provider);
     }
 
-    @Override
-    public Outcome process(VerificationAnalysisClaim claim) {
+    public Outcome process(VerificationAnalysisClaim claim, VerificationCriteria criteria) {
+        Objects.requireNonNull(criteria, "criteria must not be null");
         requireNoTransaction("input load");
         final VerificationAnalysisInput input;
         try {
@@ -45,17 +47,35 @@ public final class VerificationAnalysisMediaProcessor implements VerificationAna
         }
 
         requireNoTransaction("media validation");
+        final VerificationCriteria.MediaModality modality;
         try {
             requireValidMedia(input, media);
+            modality = mediaModality(input.contentType());
+            if (!criteria.supportedMedia().contains(modality)) {
+                throw new IllegalArgumentException("criteria does not support the stored media modality");
+            }
         } catch (IllegalArgumentException exception) {
             return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
         }
 
         requireNoTransaction("provider execution");
-        return Objects.requireNonNull(
-                provider.analyze(input, media),
-                "provider outcome must not be null"
+        VerificationAnalysisProvider.Result result = Objects.requireNonNull(
+                provider.analyze(
+                        criteria.providerContract(),
+                        new VerificationAnalysisProvider.Evidence(
+                                modality,
+                                input.contentType(),
+                                media.content()
+                        )
+                ),
+                "provider result must not be null"
         );
+        if (result.observation().reasonCode()
+                == VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                && criteria.requiredObservations().stream().anyMatch(type -> !result.observation().hasValue(type))) {
+            return new Failure(VerificationAnalysisFailureCode.INVALID_RESPONSE);
+        }
+        return new Observed(criteria, result);
     }
 
     private void requireValidMedia(
@@ -80,6 +100,37 @@ public final class VerificationAnalysisMediaProcessor implements VerificationAna
     private void requireNoTransaction(String operation) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException(operation + " must run without a DB transaction");
+        }
+    }
+
+    private VerificationCriteria.MediaModality mediaModality(String contentType) {
+        if (contentType.startsWith("image/")) {
+            return VerificationCriteria.MediaModality.PHOTO;
+        }
+        if (contentType.startsWith("video/")) {
+            return VerificationCriteria.MediaModality.VIDEO;
+        }
+        throw new IllegalArgumentException("stored media modality is unsupported");
+    }
+
+    public sealed interface Outcome permits Observed, Failure {
+    }
+
+    public record Observed(
+            VerificationCriteria criteria,
+            VerificationAnalysisProvider.Result providerResult
+    ) implements Outcome {
+
+        public Observed {
+            Objects.requireNonNull(criteria, "criteria must not be null");
+            Objects.requireNonNull(providerResult, "providerResult must not be null");
+        }
+    }
+
+    public record Failure(VerificationAnalysisFailureCode failureCode) implements Outcome {
+
+        public Failure {
+            Objects.requireNonNull(failureCode, "failureCode must not be null");
         }
     }
 }

@@ -13,7 +13,9 @@ import com.allog.user.domain.User;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
+import com.allog.verification.analysis.domain.VerificationCriteria;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.VerificationAnalysisClaim;
 import com.allog.verification.analysis.service.VerificationAnalysisClaimService;
@@ -495,9 +497,9 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(2, statements),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
                 () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
-                () -> assertEquals("synthetic-reason", analysis.getReasonCode()),
+                () -> assertEquals("OBSERVATION_COMPLETE", analysis.getReasonCode()),
                 () -> assertEquals("synthetic-model", analysis.getProviderModel()),
-                () -> assertEquals("synthetic-criteria", analysis.getCriteriaVersion()),
+                () -> assertEquals("TEST_EVIDENCE@1", analysis.getCriteriaVersion()),
                 () -> assertEquals(true, analysis.getObjectPresence()),
                 () -> assertEquals(new BigDecimal("0.7500"), analysis.getRelevanceScore()),
                 () -> assertEquals(false, analysis.getAnomalyDetected()),
@@ -1019,7 +1021,7 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void mediaProcessorCompletesWorkerWithSevenStatementsAndNoExternalTransaction() {
+    void backendDecisionCanCombineMediaObservationAndCompleteWorkerWithoutExternalTransaction() {
         Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
@@ -1029,14 +1031,17 @@ class VerificationAnalysisPersistenceTest {
                 new byte[]{1, 2, 3, 4}
         ));
         AtomicBoolean providerTransaction = new AtomicBoolean(true);
-        VerificationAnalysisProvider provider = (input, media) -> {
+        VerificationAnalysisProvider provider = (criteria, evidence) -> {
             providerTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
-            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+            return providerResult();
         };
-        VerificationAnalysisWorker worker = worker(new VerificationAnalysisMediaProcessor(
-                inputLoader,
-                storage,
-                provider
+        VerificationAnalysisMediaProcessor mediaProcessor = new VerificationAnalysisMediaProcessor(
+                inputLoader, storage, provider
+        );
+        VerificationAnalysisWorker worker = worker(decidingProcessor(
+                mediaProcessor,
+                criteria(),
+                AnalysisRecommendation.PASS
         ));
         clock.resetReads();
         SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
@@ -1079,16 +1084,19 @@ class VerificationAnalysisPersistenceTest {
         ));
         CountDownLatch providerStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
-        VerificationAnalysisProvider blockingProvider = (input, media) -> {
+        VerificationAnalysisProvider blockingProvider = (criteria, evidence) -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             providerStarted.countDown();
             await(releaseProvider);
-            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+            return providerResult();
         };
-        VerificationAnalysisWorker oldWorker = worker(new VerificationAnalysisMediaProcessor(
-                inputLoader,
-                storage,
-                blockingProvider
+        VerificationAnalysisMediaProcessor mediaProcessor = new VerificationAnalysisMediaProcessor(
+                inputLoader, storage, blockingProvider
+        );
+        VerificationAnalysisWorker oldWorker = worker(decidingProcessor(
+                mediaProcessor,
+                criteria(),
+                AnalysisRecommendation.PASS
         ));
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -1196,13 +1204,56 @@ class VerificationAnalysisPersistenceTest {
     private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {
         return new VerificationAnalysisSuccessResult(
                 recommendation,
-                "synthetic-reason",
+                criteria().reference(),
+                providerResult()
+        );
+    }
+
+    private VerificationAnalysisProcessor decidingProcessor(
+            VerificationAnalysisMediaProcessor mediaProcessor,
+            VerificationCriteria criteria,
+            AnalysisRecommendation recommendation
+    ) {
+        return claim -> {
+            VerificationAnalysisMediaProcessor.Outcome outcome = mediaProcessor.process(claim, criteria);
+            if (outcome instanceof VerificationAnalysisMediaProcessor.Failure failure) {
+                return new VerificationAnalysisProcessor.Failure(failure.failureCode());
+            }
+            VerificationAnalysisMediaProcessor.Observed observed =
+                    (VerificationAnalysisMediaProcessor.Observed) outcome;
+            return new VerificationAnalysisProcessor.Success(new VerificationAnalysisSuccessResult(
+                    recommendation,
+                    observed.criteria().reference(),
+                    observed.providerResult()
+            ));
+        };
+    }
+
+    private VerificationCriteria criteria() {
+        return new VerificationCriteria(
+                new VerificationCriteria.Reference("TEST_EVIDENCE", 1),
+                1L,
+                Set.of(VerificationCriteria.MediaModality.VIDEO),
+                Set.of(
+                        VerificationCriteria.ObservationType.TARGET_EVIDENCE_VISIBLE,
+                        VerificationCriteria.ObservationType.CRITERIA_RELEVANCE_SCORE,
+                        VerificationCriteria.ObservationType.INTEGRITY_ANOMALY,
+                        VerificationCriteria.ObservationType.FRAMING_SUFFICIENCY
+                ),
+                "Test-only evidence requirements"
+        );
+    }
+
+    private VerificationAnalysisProvider.Result providerResult() {
+        return new VerificationAnalysisProvider.Result(
                 "synthetic-model",
-                "synthetic-criteria",
-                true,
-                new BigDecimal("0.7500"),
-                false,
-                true
+                new VerificationAnalysisObservation(
+                        true,
+                        new BigDecimal("0.7500"),
+                        false,
+                        true,
+                        VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                )
         );
     }
 
