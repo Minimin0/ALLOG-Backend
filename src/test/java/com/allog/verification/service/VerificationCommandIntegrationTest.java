@@ -10,6 +10,9 @@ import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
+import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
+import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
@@ -42,6 +45,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -95,6 +99,9 @@ class VerificationCommandIntegrationTest {
     private VerificationMediaRepository verificationMediaRepository;
 
     @Autowired
+    private VerificationAnalysisRepository verificationAnalysisRepository;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Autowired
@@ -109,10 +116,14 @@ class VerificationCommandIntegrationTest {
     @Autowired
     private MutableClock clock;
 
+    @Autowired
+    private MutableAnalysisRequestIdGenerator analysisRequestIdGenerator;
+
     @BeforeEach
     void resetMediaBoundary() {
         clock.set(SNAPSHOT_NOW);
         mediaStorage.reset();
+        analysisRequestIdGenerator.reset();
     }
 
     @Test
@@ -163,6 +174,11 @@ class VerificationCommandIntegrationTest {
                 () -> assertEquals(submittedAt.get(0), submittedAt.get(1)),
                 () -> assertEquals(VerificationStatus.SUBMITTED, verification.getStatus()),
                 () -> assertEquals(verification.getSubmittedAt(), media.getConfirmedAt()),
+                () -> assertEquals(1, analysisRows(verification.getId())),
+                () -> assertEquals(VerificationAnalysisStatus.PENDING, verificationAnalysisRepository
+                        .findByVerification_Id(verification.getId())
+                        .orElseThrow()
+                        .getStatus()),
                 () -> assertEquals(SNAPSHOT_NOW, inTransaction(() -> verificationRepository
                         .findByGroupMember_IdAndRoutineSchedule_IdAndScheduledDate(
                                 fixture.memberId(), fixture.scheduleId(), LocalDate.of(2026, 8, 11)
@@ -173,14 +189,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV5() {
+    void flywayHasExactlyV1ThroughV6() {
         assertAll(
-                () -> assertEquals(5, jdbcTemplate.queryForObject(
+                () -> assertEquals(6, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '5'",
+                        "select count(*) from flyway_schema_history where version = '6'",
                         Integer.class
                 ))
         );
@@ -311,6 +327,11 @@ class VerificationCommandIntegrationTest {
                 () -> assertEquals(SNAPSHOT_NOW, submitted.submittedAt()),
                 () -> assertEquals(SNAPSHOT_NOW, media.getConfirmedAt()),
                 () -> assertEquals(100L, media.getConfirmedSizeBytes()),
+                () -> assertEquals(1, analysisRows(submitted.verificationId())),
+                () -> assertEquals(VerificationAnalysisStatus.PENDING, verificationAnalysisRepository
+                        .findByVerification_Id(submitted.verificationId())
+                        .orElseThrow()
+                        .getStatus()),
                 () -> assertFalse(mediaStorage.issueTransactionActive()),
                 () -> assertFalse(mediaStorage.inspectTransactionActive())
         );
@@ -334,6 +355,7 @@ class VerificationCommandIntegrationTest {
                 () -> assertNull(verification.getSubmittedAt()),
                 () -> assertNull(media.getConfirmedAt()),
                 () -> assertNull(media.getConfirmedSizeBytes()),
+                () -> assertEquals(0, analysisRows(verification.getId())),
                 () -> assertFalse(mediaStorage.inspectTransactionActive())
         );
     }
@@ -373,6 +395,7 @@ class VerificationCommandIntegrationTest {
         );
 
         assertEquals(VerificationMediaCommandException.Reason.MEDIA_NOT_BOUND, exception.reason());
+        assertEquals(0, analysisRows(currentVerification(fixture).getId()));
     }
 
     @Test
@@ -391,6 +414,7 @@ class VerificationCommandIntegrationTest {
         assertAll(
                 () -> assertEquals(first.verificationId(), second.verificationId()),
                 () -> assertEquals(first.submittedAt(), second.submittedAt()),
+                () -> assertEquals(1, analysisRows(first.verificationId())),
                 () -> assertEquals(inspections, mediaStorage.inspectCount()),
                 () -> assertThrows(
                         VerificationCommandConflictException.class,
@@ -418,7 +442,42 @@ class VerificationCommandIntegrationTest {
                 () -> assertEquals(VerificationStatus.PENDING_UPLOAD, verification.getStatus()),
                 () -> assertNull(verification.getSubmittedAt()),
                 () -> assertNull(media.getConfirmedAt()),
-                () -> assertNull(media.getConfirmedSizeBytes())
+                () -> assertNull(media.getConfirmedSizeBytes()),
+                () -> assertEquals(0, analysisRows(verification.getId()))
+        );
+    }
+
+    @Test
+    void analysisInsertFailureRollsBackMediaConfirmationAndSubmission() {
+        UUID duplicateRequestId = UUID.randomUUID();
+        analysisRequestIdGenerator.use(duplicateRequestId);
+
+        Fixture existing = fixture();
+        mediaUploadService.issueCurrentUpload(existing.groupId(), existing.userId(), "video/mp4", 100);
+        mediaSubmissionService.submitCurrent(existing.groupId(), existing.userId());
+
+        Fixture target = fixture();
+        mediaUploadService.issueCurrentUpload(target.groupId(), target.userId(), "video/mp4", 100);
+        Long targetVerificationId = currentVerification(target).getId();
+
+        assertThrows(
+                DataAccessException.class,
+                () -> mediaSubmissionService.submitCurrent(target.groupId(), target.userId())
+        );
+
+        Verification verification = currentVerification(target);
+        VerificationMedia media = verificationMediaRepository.findByVerification_Id(targetVerificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.PENDING_UPLOAD, verification.getStatus()),
+                () -> assertNull(verification.getSubmittedAt()),
+                () -> assertNull(media.getConfirmedAt()),
+                () -> assertNull(media.getConfirmedSizeBytes()),
+                () -> assertEquals(0, analysisRows(targetVerificationId)),
+                () -> assertEquals(1, jdbcTemplate.queryForObject(
+                        "select count(*) from verification_analysis where analysis_request_id = ?",
+                        Integer.class,
+                        duplicateRequestId.toString()
+                ))
         );
     }
 
@@ -530,6 +589,14 @@ class VerificationCommandIntegrationTest {
         );
     }
 
+    private int analysisRows(Long verificationId) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from verification_analysis where verification_id = ?",
+                Integer.class,
+                verificationId
+        );
+    }
+
     private String uploadOutcome(Fixture fixture, String contentType) {
         try {
             mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), contentType, 100);
@@ -592,6 +659,12 @@ class VerificationCommandIntegrationTest {
         @Primary
         TestMediaStorage verificationTestMediaStorage() {
             return new TestMediaStorage();
+        }
+
+        @Bean
+        @Primary
+        MutableAnalysisRequestIdGenerator verificationTestAnalysisRequestIdGenerator() {
+            return new MutableAnalysisRequestIdGenerator();
         }
     }
 
@@ -704,6 +777,25 @@ class VerificationCommandIntegrationTest {
         @Override
         public Instant instant() {
             return instant.get();
+        }
+    }
+
+    static final class MutableAnalysisRequestIdGenerator extends AnalysisRequestIdGenerator {
+
+        private final AtomicReference<UUID> fixed = new AtomicReference<>();
+
+        @Override
+        public UUID generate() {
+            UUID value = fixed.get();
+            return value == null ? super.generate() : value;
+        }
+
+        void use(UUID value) {
+            fixed.set(value);
+        }
+
+        void reset() {
+            fixed.set(null);
         }
     }
 

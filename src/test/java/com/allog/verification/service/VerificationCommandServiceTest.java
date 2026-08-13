@@ -12,6 +12,8 @@ import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.routine.repository.RoutineScheduleRepository;
 import com.allog.user.domain.User;
+import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
+import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
@@ -65,11 +67,14 @@ class VerificationCommandServiceTest {
     @Mock
     private VerificationMediaRepository verificationMediaRepository;
     @Mock
+    private VerificationAnalysisRepository verificationAnalysisRepository;
+    @Mock
     private VerificationCreator verificationCreator;
     @Mock
     private VerificationMediaPolicy mediaPolicy;
 
     private CountingClock clock;
+    private final AnalysisRequestIdGenerator analysisRequestIdGenerator = new AnalysisRequestIdGenerator();
 
     @BeforeEach
     void setUp() {
@@ -188,6 +193,7 @@ class VerificationCommandServiceTest {
                 () -> assertEquals(BEFORE_DEADLINE, result.getSubmittedAt()),
                 () -> assertEquals(1, clock.instantCalls())
         );
+        verify(verificationAnalysisRepository).save(any());
     }
 
     @ParameterizedTest
@@ -205,6 +211,29 @@ class VerificationCommandServiceTest {
                 () -> service().submitInspectedCurrent(GROUP_ID, USER_ID, INSPECTION)
         );
         assertEquals(VerificationStatus.PENDING_UPLOAD, pending.getStatus());
+        verify(verificationAnalysisRepository, never()).save(any());
+    }
+
+    @Test
+    void mediaConfirmationFailureDoesNotCreateAnalysis() {
+        Fixture fixture = activeFixture(ScheduleType.DAILY, Set.of(), "Asia/Seoul", BEFORE_DEADLINE);
+        Verification pending = Verification.create(
+                fixture.member(), fixture.schedule(), LocalDate.of(2026, 8, 11)
+        );
+        stubSubmit(fixture, pending);
+        VerificationMediaStorage.StoredMediaInspection mismatched =
+                new VerificationMediaStorage.StoredMediaInspection(
+                        INSPECTION.objectKey(),
+                        INSPECTION.contentLength() + 1,
+                        INSPECTION.contentType()
+                );
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service().submitInspectedCurrent(GROUP_ID, USER_ID, mismatched)
+        );
+        assertEquals(VerificationStatus.PENDING_UPLOAD, pending.getStatus());
+        verify(verificationAnalysisRepository, never()).save(any());
     }
 
     @Test
@@ -255,6 +284,7 @@ class VerificationCommandServiceTest {
                 () -> assertEquals(status, result.getStatus()),
                 () -> assertEquals(firstSubmittedAt, result.getSubmittedAt())
         );
+        verify(verificationAnalysisRepository, never()).save(any());
     }
 
     @Test
@@ -334,11 +364,13 @@ class VerificationCommandServiceTest {
         var order = org.mockito.Mockito.inOrder(
                 groupMemberRepository,
                 verificationRepository,
-                verificationMediaRepository
+                verificationMediaRepository,
+                verificationAnalysisRepository
         );
         order.verify(groupMemberRepository).findByRoutineGroup_IdAndUser_IdForUpdate(GROUP_ID, USER_ID);
         order.verify(verificationRepository).findCurrentForUpdate(null, null, LocalDate.of(2026, 8, 11));
         order.verify(verificationMediaRepository).findByVerificationIdForUpdate(null);
+        order.verify(verificationAnalysisRepository).save(any());
     }
 
     private VerificationCommandService service() {
@@ -347,6 +379,8 @@ class VerificationCommandServiceTest {
                 routineScheduleRepository,
                 verificationRepository,
                 verificationMediaRepository,
+                verificationAnalysisRepository,
+                analysisRequestIdGenerator,
                 verificationCreator,
                 mediaPolicy,
                 clock

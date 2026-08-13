@@ -7,6 +7,9 @@ import com.allog.group.repository.GroupMemberRepository;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.repository.RoutineScheduleRepository;
 import com.allog.routine.schedule.RoutineScheduleCalculator;
+import com.allog.verification.analysis.domain.VerificationAnalysis;
+import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
+import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
@@ -30,6 +33,8 @@ public class VerificationCommandService {
     private final RoutineScheduleRepository routineScheduleRepository;
     private final VerificationRepository verificationRepository;
     private final VerificationMediaRepository verificationMediaRepository;
+    private final VerificationAnalysisRepository verificationAnalysisRepository;
+    private final AnalysisRequestIdGenerator analysisRequestIdGenerator;
     private final VerificationCreator verificationCreator;
     private final VerificationMediaPolicy mediaPolicy;
     private final Clock clock;
@@ -40,6 +45,8 @@ public class VerificationCommandService {
             RoutineScheduleRepository routineScheduleRepository,
             VerificationRepository verificationRepository,
             VerificationMediaRepository verificationMediaRepository,
+            VerificationAnalysisRepository verificationAnalysisRepository,
+            AnalysisRequestIdGenerator analysisRequestIdGenerator,
             VerificationCreator verificationCreator,
             VerificationMediaPolicy mediaPolicy,
             Clock clock
@@ -48,6 +55,8 @@ public class VerificationCommandService {
         this.routineScheduleRepository = Objects.requireNonNull(routineScheduleRepository);
         this.verificationRepository = Objects.requireNonNull(verificationRepository);
         this.verificationMediaRepository = Objects.requireNonNull(verificationMediaRepository);
+        this.verificationAnalysisRepository = Objects.requireNonNull(verificationAnalysisRepository);
+        this.analysisRequestIdGenerator = Objects.requireNonNull(analysisRequestIdGenerator);
         this.verificationCreator = Objects.requireNonNull(verificationCreator);
         this.mediaPolicy = Objects.requireNonNull(mediaPolicy);
         this.clock = Objects.requireNonNull(clock);
@@ -205,6 +214,10 @@ public class VerificationCommandService {
         Clock eventClock = Clock.fixed(current.snapshotNow(), clock.getZone());
         media.confirm(inspection.contentLength(), eventClock);
         verification.submit(eventClock);
+        verificationAnalysisRepository.save(VerificationAnalysis.createPending(
+                verification,
+                analysisRequestIdGenerator.generate()
+        ));
         return verification;
     }
 
