@@ -16,6 +16,13 @@ public interface VerificationMediaStorage {
 
     StoredMediaInspection inspect(String objectKey);
 
+    default StoredMedia acquire(String objectKey, long maxBytes) {
+        throw new StorageException(
+                StorageException.Reason.UNAVAILABLE,
+                "verification media acquisition is unavailable"
+        );
+    }
+
     record UploadGrant(
             URI uri,
             String method,
@@ -32,6 +39,22 @@ public interface VerificationMediaStorage {
     }
 
     record StoredMediaInspection(String objectKey, long contentLength, String contentType) {
+    }
+
+    record StoredMedia(String objectKey, long contentLength, String contentType, byte[] content) {
+
+        public StoredMedia {
+            content = java.util.Objects.requireNonNull(content, "content must not be null").clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+
+        public int bodyLength() {
+            return content.length;
+        }
     }
 
     final class StorageException extends RuntimeException {

@@ -18,6 +18,14 @@ public interface VerificationAnalysisRepository extends JpaRepository<Verificati
     Optional<VerificationAnalysis> findByVerification_Id(Long verificationId);
 
     @Query("""
+            select analysis
+            from VerificationAnalysis analysis
+            join fetch analysis.verification
+            where analysis.id = :analysisId
+            """)
+    Optional<VerificationAnalysis> findByIdWithVerification(@Param("analysisId") Long analysisId);
+
+    @Query("""
             select analysis.id
             from VerificationAnalysis analysis
             where analysis.status = :status

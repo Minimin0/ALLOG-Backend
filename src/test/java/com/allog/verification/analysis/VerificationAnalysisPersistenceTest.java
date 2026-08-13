@@ -17,11 +17,18 @@ import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.VerificationAnalysisClaim;
 import com.allog.verification.analysis.service.VerificationAnalysisClaimService;
+import com.allog.verification.analysis.service.VerificationAnalysisInput;
+import com.allog.verification.analysis.service.VerificationAnalysisInputLoader;
+import com.allog.verification.analysis.service.VerificationAnalysisMediaProcessor;
 import com.allog.verification.analysis.service.VerificationAnalysisProcessor;
+import com.allog.verification.analysis.service.VerificationAnalysisProvider;
 import com.allog.verification.analysis.service.VerificationAnalysisResultService;
 import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult;
 import com.allog.verification.analysis.service.VerificationAnalysisWorker;
 import com.allog.verification.domain.Verification;
+import com.allog.verification.domain.VerificationMedia;
+import com.allog.verification.storage.VerificationMediaProperties;
+import com.allog.verification.storage.VerificationMediaStorage;
 import jakarta.persistence.EntityManager;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +48,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -93,6 +101,9 @@ class VerificationAnalysisPersistenceTest {
 
     @Autowired
     private VerificationAnalysisResultService resultService;
+
+    @Autowired
+    private VerificationAnalysisInputLoader inputLoader;
 
     @Autowired
     private VerificationAnalysisWorker productionWorker;
@@ -920,6 +931,198 @@ class VerificationAnalysisPersistenceTest {
         );
     }
 
+    @Test
+    void loadsCurrentAttemptConfirmedMediaInputWithTwoQueries() {
+        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        VerificationAnalysisClaim claim = claimService.claimNextPending().orElseThrow();
+        SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
+        var statistics = sessionFactory.getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+
+        VerificationAnalysisInput input;
+        long statements;
+        try {
+            input = inputLoader.load(claim);
+            statements = statistics.getPrepareStatementCount();
+        } finally {
+            statistics.setStatisticsEnabled(false);
+        }
+
+        assertAll(
+                () -> assertEquals(analysisId, input.analysisId()),
+                () -> assertEquals(claim.analysisRequestId(), input.analysisRequestId()),
+                () -> assertEquals(claim.attemptCount(), input.attemptCount()),
+                () -> assertEquals("video/mp4", input.contentType()),
+                () -> assertEquals(4, input.sizeBytes()),
+                () -> assertTrue(input.objectKey().startsWith("verification-media/")),
+                () -> assertEquals(2, statements),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void inputLoaderRejectsStaleClaimAndInvalidVerificationState() {
+        Long staleId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        VerificationAnalysisClaim current = claimService.claimNextPending().orElseThrow();
+        VerificationAnalysisClaim stale = new VerificationAnalysisClaim(
+                staleId,
+                current.analysisRequestId(),
+                current.attemptCount() + 1
+        );
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.STALE_CLAIM, stale);
+
+        Long invalidVerificationId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        VerificationAnalysisClaim invalidVerification = claimService.claimNextPending().orElseThrow();
+        jdbcTemplate.update(
+                "update verification set status = 'PROCESSING' where id = "
+                        + "(select verification_id from verification_analysis where id = ?)",
+                invalidVerificationId
+        );
+        assertLoadReason(
+                VerificationAnalysisInputLoader.Reason.INVALID_VERIFICATION,
+                invalidVerification
+        );
+    }
+
+    @Test
+    void inputLoaderRejectsMissingAndUnconfirmedMedia() {
+        Long missingMediaId = pendingAnalysisId();
+        VerificationAnalysisClaim missingMedia = claimService.claimNextPending().orElseThrow();
+        assertEquals(missingMediaId, missingMedia.analysisId());
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.MISSING_MEDIA, missingMedia);
+
+        Long unconfirmedId = pendingAnalysisWithMedia("video/mp4", 4, false);
+        VerificationAnalysisClaim unconfirmed = claimService.claimNextPending().orElseThrow();
+        assertEquals(unconfirmedId, unconfirmed.analysisId());
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.UNCONFIRMED_MEDIA, unconfirmed);
+    }
+
+    @Test
+    void inputLoaderRejectsBlankKeyUnsupportedTypeAndOversize() {
+        Long blankKeyId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        VerificationAnalysisClaim blankKey = claimService.claimNextPending().orElseThrow();
+        jdbcTemplate.update(
+                "update verification_media set object_key = '' where verification_id = "
+                        + "(select verification_id from verification_analysis where id = ?)",
+                blankKeyId
+        );
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.INVALID_MEDIA, blankKey);
+
+        pendingAnalysisWithMedia("application/octet-stream", 4, true);
+        VerificationAnalysisClaim unsupported = claimService.claimNextPending().orElseThrow();
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.INVALID_MEDIA, unsupported);
+
+        pendingAnalysisWithMedia("video/mp4", 1_025, true);
+        VerificationAnalysisClaim oversized = claimService.claimNextPending().orElseThrow();
+        assertLoadReason(VerificationAnalysisInputLoader.Reason.INVALID_MEDIA, oversized);
+    }
+
+    @Test
+    void mediaProcessorCompletesWorkerWithSevenStatementsAndNoExternalTransaction() {
+        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        String objectKey = analysisObjectKey(analysisId);
+        TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
+                objectKey,
+                4,
+                "video/mp4",
+                new byte[]{1, 2, 3, 4}
+        ));
+        AtomicBoolean providerTransaction = new AtomicBoolean(true);
+        VerificationAnalysisProvider provider = (input, media) -> {
+            providerTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        };
+        VerificationAnalysisWorker worker = worker(new VerificationAnalysisMediaProcessor(
+                inputLoader,
+                storage,
+                provider
+        ));
+        clock.resetReads();
+        SessionFactory sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class);
+        var statistics = sessionFactory.getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+
+        VerificationAnalysisWorker.ExecutionResult result;
+        long statements;
+        try {
+            result = worker.processNext();
+            statements = statistics.getPrepareStatementCount();
+        } finally {
+            statistics.setStatisticsEnabled(false);
+        }
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, result),
+                () -> assertEquals(7, statements),
+                () -> assertFalse(storage.transactionActive()),
+                () -> assertFalse(providerTransaction.get()),
+                () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
+                () -> assertEquals(2, clock.reads()),
+                () -> assertEquals(2, clock.transactionalReads()),
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation())
+        );
+    }
+
+    @Test
+    void staleMediaProcessorResultCannotOverwriteCurrentAttempt() throws Exception {
+        Long analysisId = pendingAnalysisWithMedia("video/mp4", 4, true);
+        String objectKey = analysisObjectKey(analysisId);
+        TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
+                objectKey,
+                4,
+                "video/mp4",
+                new byte[]{1, 2, 3, 4}
+        ));
+        CountDownLatch providerStarted = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        VerificationAnalysisProvider blockingProvider = (input, media) -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            providerStarted.countDown();
+            await(releaseProvider);
+            return new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.PASS));
+        };
+        VerificationAnalysisWorker oldWorker = worker(new VerificationAnalysisMediaProcessor(
+                inputLoader,
+                storage,
+                blockingProvider
+        ));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<VerificationAnalysisWorker.ExecutionResult> oldResult = executor.submit(oldWorker::processNext);
+            assertTrue(providerStarted.await(5, TimeUnit.SECONDS));
+
+            clock.set(WORKER_NOW.plusSeconds(300));
+            assertTrue(claimService.recoverNextStaleProcessing());
+            clock.set(WORKER_NOW.plusSeconds(330));
+            VerificationAnalysisWorker currentWorker = worker(claim ->
+                    new VerificationAnalysisProcessor.Success(successResult(AnalysisRecommendation.REVIEW_REQUIRED))
+            );
+            assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, currentWorker.processNext());
+
+            releaseProvider.countDown();
+            assertEquals(
+                    VerificationAnalysisWorker.ExecutionResult.STALE_RESULT_REJECTED,
+                    oldResult.get(10, TimeUnit.SECONDS)
+            );
+        } finally {
+            releaseProvider.countDown();
+            executor.shutdownNow();
+        }
+
+        VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(2, analysis.getAttemptCount()),
+                () -> assertEquals(AnalysisRecommendation.REVIEW_REQUIRED, analysis.getRecommendation()),
+                () -> assertEquals(WORKER_NOW.plusSeconds(330), analysis.getCompletedAt())
+        );
+    }
+
     private Long submittedVerificationId() {
         return inTransaction(() -> persistSubmittedVerification().getId());
     }
@@ -928,6 +1131,28 @@ class VerificationAnalysisPersistenceTest {
         return inTransaction(() -> {
             Verification verification = persistSubmittedVerification();
             VerificationAnalysis analysis = VerificationAnalysis.createPending(verification, UUID.randomUUID());
+            repository.saveAndFlush(analysis);
+            return analysis.getId();
+        });
+    }
+
+    private Long pendingAnalysisWithMedia(String contentType, long sizeBytes, boolean confirmed) {
+        return inTransaction(() -> {
+            Verification verification = persistSubmittedVerification();
+            VerificationMedia media = VerificationMedia.create(
+                    verification,
+                    "verification-media/" + UUID.randomUUID(),
+                    contentType,
+                    sizeBytes
+            );
+            if (confirmed) {
+                media.confirm(sizeBytes, Clock.fixed(WORKER_NOW, ZoneOffset.UTC));
+            }
+            entityManager.persist(media);
+            VerificationAnalysis analysis = VerificationAnalysis.createPending(
+                    verification,
+                    UUID.randomUUID()
+            );
             repository.saveAndFlush(analysis);
             return analysis.getId();
         });
@@ -942,6 +1167,30 @@ class VerificationAnalysisPersistenceTest {
 
     private VerificationAnalysisWorker worker(VerificationAnalysisProcessor processor) {
         return new VerificationAnalysisWorker(claimService, resultService, Optional.of(processor));
+    }
+
+    private void assertLoadReason(
+            VerificationAnalysisInputLoader.Reason expected,
+            VerificationAnalysisClaim claim
+    ) {
+        VerificationAnalysisInputLoader.LoadException exception = assertThrows(
+                VerificationAnalysisInputLoader.LoadException.class,
+                () -> inputLoader.load(claim)
+        );
+        assertEquals(expected, exception.reason());
+    }
+
+    private String analysisObjectKey(Long analysisId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        select media.object_key
+                        from verification_analysis analysis
+                        join verification_media media on media.verification_id = analysis.verification_id
+                        where analysis.id = ?
+                        """,
+                String.class,
+                analysisId
+        );
     }
 
     private VerificationAnalysisSuccessResult successResult(AnalysisRecommendation recommendation) {
@@ -1103,6 +1352,38 @@ class VerificationAnalysisPersistenceTest {
         }
     }
 
+    static final class TrackingAcquisitionStorage implements VerificationMediaStorage {
+
+        private final StoredMedia media;
+        private volatile boolean transactionActive;
+
+        TrackingAcquisitionStorage(StoredMedia media) {
+            this.media = media;
+        }
+
+        @Override
+        public UploadGrant issueUpload(String objectKey, String contentType, long sizeBytes, Instant expiresAt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public StoredMediaInspection inspect(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public StoredMedia acquire(String objectKey, long maxBytes) {
+            transactionActive = TransactionSynchronizationManager.isActualTransactionActive();
+            assertEquals(media.objectKey(), objectKey);
+            assertEquals(media.contentLength(), maxBytes);
+            return media;
+        }
+
+        boolean transactionActive() {
+            return transactionActive;
+        }
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class WorkerTestConfiguration {
 
@@ -1110,6 +1391,19 @@ class VerificationAnalysisPersistenceTest {
         @Primary
         MutableClock verificationAnalysisWorkerClock() {
             return new MutableClock(WORKER_NOW);
+        }
+
+        @Bean
+        @Primary
+        VerificationMediaProperties verificationAnalysisMediaProperties() {
+            return new VerificationMediaProperties(
+                    true,
+                    "test-bucket",
+                    "ap-northeast-2",
+                    1_024,
+                    Duration.ofMinutes(5),
+                    Set.of("video/mp4", "image/jpeg")
+            );
         }
     }
 

@@ -1,8 +1,11 @@
 package com.allog.verification.storage.s3;
 
 import com.allog.verification.storage.VerificationMediaStorage;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -11,10 +14,11 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.IOException;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.net.URI;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -113,6 +117,42 @@ public final class S3VerificationMediaStorage implements VerificationMediaStorag
             }
             throw configuration("verification media storage request was rejected", exception);
         } catch (SdkClientException exception) {
+            throw unavailable("verification media storage is unavailable", exception);
+        }
+    }
+
+    @Override
+    public StoredMedia acquire(String objectKey, long maxBytes) {
+        String expectedObjectKey = requireText(objectKey, "objectKey");
+        if (maxBytes <= 0 || maxBytes >= Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("maxBytes must be between 1 and Integer.MAX_VALUE - 1");
+        }
+        try (ResponseInputStream<GetObjectResponse> response = s3Client.getObject(GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(expectedObjectKey)
+                .build())) {
+            byte[] content = response.readNBytes(Math.toIntExact(maxBytes + 1));
+            GetObjectResponse metadata = response.response();
+            Long contentLength = metadata.contentLength();
+            return new StoredMedia(
+                    expectedObjectKey,
+                    contentLength == null ? -1 : contentLength,
+                    metadata.contentType(),
+                    content
+            );
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 404) {
+                throw new StorageException(
+                        StorageException.Reason.NOT_FOUND,
+                        "verification media object was not found",
+                        exception
+                );
+            }
+            if (exception.statusCode() >= 500) {
+                throw unavailable("verification media storage is unavailable", exception);
+            }
+            throw configuration("verification media storage request was rejected", exception);
+        } catch (SdkClientException | IOException exception) {
             throw unavailable("verification media storage is unavailable", exception);
         }
     }

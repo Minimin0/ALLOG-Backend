@@ -2,6 +2,7 @@ package com.allog;
 
 import com.allog.ai.coaching.controller.AiCoachPreviewController;
 import com.allog.ai.coaching.provider.AiCoachProvider;
+import com.allog.verification.analysis.service.VerificationAnalysisProcessor;
 import com.allog.verification.storage.VerificationMediaStorage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ class AllogApplicationTests {
         assertTrue(applicationContext.getBeansOfType(Clock.class).size() == 1);
         assertTrue(applicationContext.getBeansOfType(S3Client.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(S3Presigner.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(VerificationAnalysisProcessor.class).isEmpty());
         VerificationMediaStorage storage = applicationContext.getBean(VerificationMediaStorage.class);
         assertThrows(
                 VerificationMediaStorage.StorageException.class,
