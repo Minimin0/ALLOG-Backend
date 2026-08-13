@@ -320,8 +320,8 @@ class PersonalProgressCalculatorTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = VerificationStatus.class, names = {"RETRY_REQUIRED", "REJECTED"})
-    void retryOrRejectedWaitsForDeadlineBeforeBreakingStreak(VerificationStatus status) {
+    @EnumSource(value = VerificationStatus.class, names = {"REJECTED", "INVALIDATED"})
+    void terminalFailureBreaksStreakBeforeDeadline(VerificationStatus status) {
         Fixture fixture = daily("2026-08-01", "2026-08-02", 2);
         List<Verification> verifications = List.of(
                 verification(fixture, "2026-08-01", VerificationStatus.APPROVED),
@@ -329,14 +329,53 @@ class PersonalProgressCalculatorTest {
         );
 
         PersonalProgressFacts before = calculate(fixture, verifications, "2026-08-02T10:00:00Z");
-        PersonalProgressFacts after = calculate(fixture, verifications, "2026-08-02T14:30:00Z");
 
         assertAll(
-                () -> assertEquals(1, before.currentStreak()),
+                () -> assertEquals(0, before.currentStreak()),
+                () -> assertEquals(1, before.previousBestStreak()),
+                () -> assertEquals(0, before.remainingOpportunityCount())
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = VerificationStatus.class, names = {"REJECTED", "INVALIDATED"})
+    void terminalFailureIsNotExposedAsFutureOpportunity(VerificationStatus status) {
+        Fixture fixture = daily("2026-08-11", "2026-08-12", 1);
+        Verification terminal = verification(fixture, "2026-08-12", status);
+
+        PersonalProgressFacts facts = calculate(
+                fixture,
+                List.of(terminal),
+                "2026-08-11T10:00:00Z"
+        );
+
+        assertEquals(1, facts.remainingOpportunityCount());
+    }
+
+    @Test
+    void retryRequiredFailsFastInsteadOfAppearingOpen() {
+        Fixture fixture = daily("2026-08-01", "2026-08-02", 2);
+        Verification retry = verification(fixture, "2026-08-02", VerificationStatus.RETRY_REQUIRED);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> calculate(fixture, List.of(retry), "2026-08-02T10:00:00Z")
+        );
+    }
+
+    @Test
+    void pendingUploadIsOpenBeforeDeadlineAndFailedAfterDeadline() {
+        Fixture fixture = daily("2026-08-02", "2026-08-02", 1);
+        Verification pending = verification(fixture, "2026-08-02", VerificationStatus.PENDING_UPLOAD);
+
+        PersonalProgressFacts before = calculate(fixture, List.of(pending), "2026-08-02T10:00:00Z");
+        PersonalProgressFacts after = calculate(fixture, List.of(pending), "2026-08-02T14:00:00Z");
+
+        assertAll(
                 () -> assertEquals(1, before.remainingOpportunityCount()),
-                () -> assertEquals(0, after.currentStreak()),
-                () -> assertEquals(1, after.previousBestStreak()),
-                () -> assertEquals(0, after.remainingOpportunityCount())
+                () -> assertEquals(0, after.remainingOpportunityCount()),
+                () -> assertEquals(0, before.pendingDecisionCount()),
+                () -> assertEquals(0, after.pendingDecisionCount())
         );
     }
 

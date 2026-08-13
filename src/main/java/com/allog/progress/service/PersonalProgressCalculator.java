@@ -137,6 +137,9 @@ public final class PersonalProgressCalculator {
                         "verification scheduledDate is not a participation-eligible scheduled opportunity"
                 );
             }
+            if (verification.getStatus() == VerificationStatus.RETRY_REQUIRED) {
+                throw new IllegalStateException("RETRY_REQUIRED is not supported by the MVP progress contract");
+            }
             if (verification.getScheduledDate().isAfter(today)
                     && verification.getStatus().countsAsProgress()) {
                 throw new IllegalStateException("future scheduled opportunity must not be approved");
@@ -155,10 +158,13 @@ public final class PersonalProgressCalculator {
             LocalDate today,
             Clock clock
     ) {
+        VerificationStatus status = verification == null ? null : verification.getStatus();
+        if (status == VerificationStatus.REJECTED || status == VerificationStatus.INVALIDATED) {
+            return OpportunityOutcome.FAILED;
+        }
         if (scheduledDate.isAfter(today)) {
             return OpportunityOutcome.FUTURE;
         }
-        VerificationStatus status = verification == null ? null : verification.getStatus();
         if (status != null && status.countsAsProgress()) {
             return OpportunityOutcome.SUCCESS;
         }

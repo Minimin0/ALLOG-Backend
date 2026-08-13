@@ -4,7 +4,9 @@ import com.allog.group.domain.GroupMember;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,6 +27,20 @@ public interface VerificationRepository extends JpaRepository<Verification, Long
             Long groupMemberId,
             Long routineScheduleId,
             LocalDate scheduledDate
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select verification
+            from Verification verification
+            where verification.groupMember.id = :groupMemberId
+              and verification.routineSchedule.id = :routineScheduleId
+              and verification.scheduledDate = :scheduledDate
+            """)
+    Optional<Verification> findCurrentForUpdate(
+            @Param("groupMemberId") Long groupMemberId,
+            @Param("routineScheduleId") Long routineScheduleId,
+            @Param("scheduledDate") LocalDate scheduledDate
     );
 
     List<Verification> findAllByGroupMember_IdAndRoutineSchedule_IdAndStatusAndScheduledDateBetweenOrderByScheduledDateAsc(

@@ -142,6 +142,57 @@ class VerificationTest {
     }
 
     @Test
+    void retrySubmitCannotMoveSubmittedAtBackwards() {
+        Verification verification = processing();
+        verification.requestRetry();
+
+        assertThrows(IllegalStateException.class, () -> verification.submit(Clock.fixed(
+                Instant.parse("2026-08-11T09:59:59Z"), ZoneOffset.UTC
+        )));
+        assertAll(
+                () -> assertEquals(VerificationStatus.RETRY_REQUIRED, verification.getStatus()),
+                () -> assertEquals(FIRST.instant(), verification.getSubmittedAt())
+        );
+    }
+
+    @Test
+    void approvalCannotPrecedeSubmission() {
+        Verification verification = processing();
+
+        assertThrows(IllegalStateException.class, () -> verification.approve(Clock.fixed(
+                Instant.parse("2026-08-11T09:59:59Z"), ZoneOffset.UTC
+        )));
+        assertAll(
+                () -> assertEquals(VerificationStatus.PROCESSING, verification.getStatus()),
+                () -> assertNull(verification.getApprovedAt())
+        );
+    }
+
+    @Test
+    void invalidationCannotPrecedeApproval() {
+        Verification verification = processing();
+        verification.approve(SECOND);
+
+        assertThrows(IllegalStateException.class, () -> verification.invalidate(FIRST));
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, verification.getStatus()),
+                () -> assertNull(verification.getInvalidatedAt())
+        );
+    }
+
+    @Test
+    void lateApprovalIsAllowedWhenEventOrderingIsValid() {
+        Verification verification = processing();
+        Clock afterOpportunityDeadline = Clock.fixed(
+                Instant.parse("2026-08-12T00:00:00Z"), ZoneOffset.UTC
+        );
+
+        verification.approve(afterOpportunityDeadline);
+
+        assertEquals(afterOpportunityDeadline.instant(), verification.getApprovedAt());
+    }
+
+    @Test
     void blocksPendingUploadToApproved() {
         assertThrows(IllegalStateException.class, () -> verification().approve(FIRST));
     }

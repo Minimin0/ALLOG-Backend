@@ -90,8 +90,13 @@ public class Verification extends BaseTimeEntity {
     }
 
     public void submit(Clock clock) {
-        transitionTo(VerificationStatus.SUBMITTED, VerificationStatus.PENDING_UPLOAD, VerificationStatus.RETRY_REQUIRED);
-        submittedAt = requireClock(clock).instant();
+        requireTransition(VerificationStatus.SUBMITTED, VerificationStatus.PENDING_UPLOAD, VerificationStatus.RETRY_REQUIRED);
+        Instant eventTime = requireClock(clock).instant();
+        if (submittedAt != null && eventTime.isBefore(submittedAt)) {
+            throw new IllegalStateException("submittedAt must not move backwards");
+        }
+        status = VerificationStatus.SUBMITTED;
+        submittedAt = eventTime;
     }
 
     public void startProcessing() {
@@ -99,8 +104,16 @@ public class Verification extends BaseTimeEntity {
     }
 
     public void approve(Clock clock) {
-        transitionTo(VerificationStatus.APPROVED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
-        approvedAt = requireClock(clock).instant();
+        requireTransition(VerificationStatus.APPROVED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
+        Instant eventTime = requireClock(clock).instant();
+        if (submittedAt == null) {
+            throw new IllegalStateException("approval requires submittedAt");
+        }
+        if (eventTime.isBefore(submittedAt)) {
+            throw new IllegalStateException("approvedAt must not be before submittedAt");
+        }
+        status = VerificationStatus.APPROVED;
+        approvedAt = eventTime;
     }
 
     public void requestReview() {
@@ -120,8 +133,16 @@ public class Verification extends BaseTimeEntity {
     }
 
     public void invalidate(Clock clock) {
-        transitionTo(VerificationStatus.INVALIDATED, VerificationStatus.APPROVED);
-        invalidatedAt = requireClock(clock).instant();
+        requireTransition(VerificationStatus.INVALIDATED, VerificationStatus.APPROVED);
+        Instant eventTime = requireClock(clock).instant();
+        if (approvedAt == null) {
+            throw new IllegalStateException("invalidation requires approvedAt");
+        }
+        if (eventTime.isBefore(approvedAt)) {
+            throw new IllegalStateException("invalidatedAt must not be before approvedAt");
+        }
+        status = VerificationStatus.INVALIDATED;
+        invalidatedAt = eventTime;
     }
 
     public Long getId() {
@@ -157,10 +178,14 @@ public class Verification extends BaseTimeEntity {
     }
 
     private void transitionTo(VerificationStatus target, VerificationStatus... allowedSources) {
+        requireTransition(target, allowedSources);
+        status = target;
+    }
+
+    private void requireTransition(VerificationStatus target, VerificationStatus... allowedSources) {
         if (!Set.of(allowedSources).contains(status)) {
             throw new IllegalStateException("verification cannot transition from " + status + " to " + target);
         }
-        status = target;
     }
 
     private Clock requireClock(Clock clock) {
