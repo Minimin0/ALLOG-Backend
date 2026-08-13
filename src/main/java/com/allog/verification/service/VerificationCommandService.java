@@ -72,6 +72,17 @@ public class VerificationCommandService {
     }
 
     @Transactional
+    public VerificationCurrentResult createOrGetCurrentResult(Long groupId, Long currentUserId) {
+        Verification verification = createOrGetCurrent(groupId, currentUserId);
+        Instant deadline = eligibleDeadline(
+                verification.getGroupMember(),
+                verification.getRoutineSchedule(),
+                verification.getScheduledDate()
+        );
+        return VerificationCurrentResult.from(verification, deadline);
+    }
+
+    @Transactional
     UploadTarget prepareCurrentUpload(
             Long groupId,
             Long currentUserId,

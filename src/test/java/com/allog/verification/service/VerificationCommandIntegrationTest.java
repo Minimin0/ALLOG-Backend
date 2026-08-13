@@ -152,7 +152,7 @@ class VerificationCommandIntegrationTest {
 
         List<Instant> submittedAt = concurrently(() -> mediaSubmissionService.submitCurrent(
                 fixture.groupId(), fixture.userId()
-        ).getSubmittedAt());
+        ).submittedAt());
         Verification verification = currentVerification(fixture);
         VerificationMedia media = verificationMediaRepository
                 .findByVerification_Id(verification.getId())
@@ -299,12 +299,16 @@ class VerificationCommandIntegrationTest {
         Fixture fixture = fixture();
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "video/mp4", 100);
 
-        Verification submitted = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
-        VerificationMedia media = verificationMediaRepository.findByVerification_Id(submitted.getId()).orElseThrow();
+        VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(submitted.verificationId())
+                .orElseThrow();
 
         assertAll(
-                () -> assertEquals(VerificationStatus.SUBMITTED, submitted.getStatus()),
-                () -> assertEquals(SNAPSHOT_NOW, submitted.getSubmittedAt()),
+                () -> assertEquals(VerificationStatus.SUBMITTED, submitted.status()),
+                () -> assertEquals(SNAPSHOT_NOW, submitted.submittedAt()),
                 () -> assertEquals(SNAPSHOT_NOW, media.getConfirmedAt()),
                 () -> assertEquals(100L, media.getConfirmedSizeBytes()),
                 () -> assertFalse(mediaStorage.issueTransactionActive()),
@@ -375,13 +379,18 @@ class VerificationCommandIntegrationTest {
     void submittedStateIsIdempotentWithoutSecondHeadOrUploadGrant() {
         Fixture fixture = fixture();
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "video/mp4", 100);
-        Verification first = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
         int inspections = mediaStorage.inspectCount();
 
-        Verification second = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        VerificationSubmissionResult second = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
 
         assertAll(
-                () -> assertEquals(first.getId(), second.getId()),
+                () -> assertEquals(first.verificationId(), second.verificationId()),
+                () -> assertEquals(first.submittedAt(), second.submittedAt()),
                 () -> assertEquals(inspections, mediaStorage.inspectCount()),
                 () -> assertThrows(
                         VerificationCommandConflictException.class,

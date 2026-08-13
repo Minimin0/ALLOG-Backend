@@ -23,14 +23,14 @@ public class VerificationMediaSubmissionService {
         this.policy = Objects.requireNonNull(policy);
     }
 
-    public Verification submitCurrent(Long groupId, Long currentUserId) {
+    public VerificationSubmissionResult submitCurrent(Long groupId, Long currentUserId) {
         policy.requireEnabled();
         VerificationCommandService.SubmissionTarget target = commandService.prepareCurrentSubmission(
                 groupId,
                 currentUserId
         );
         if (target.idempotentResult() != null) {
-            return target.idempotentResult();
+            return VerificationSubmissionResult.from(target.idempotentResult());
         }
 
         final VerificationMediaStorage.StoredMediaInspection inspection;
@@ -51,6 +51,7 @@ public class VerificationMediaSubmissionService {
                 target.expectedSizeBytes(),
                 inspection
         );
-        return commandService.submitInspectedCurrent(groupId, currentUserId, inspection);
+        Verification verification = commandService.submitInspectedCurrent(groupId, currentUserId, inspection);
+        return VerificationSubmissionResult.from(verification);
     }
 }
