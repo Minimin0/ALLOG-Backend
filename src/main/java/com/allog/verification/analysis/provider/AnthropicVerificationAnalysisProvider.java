@@ -35,9 +35,18 @@ public final class AnthropicVerificationAnalysisProvider implements Verification
             Never output or imply PASS, FAIL, REVIEW_REQUIRED, approval, rejection, reward, ranking, or any \
             final verdict. The backend alone decides those.
             relevanceScore is criteria-relative visual relevance. It is not a pass probability and not a \
-            verification success probability.
+            verification success probability. Report limited framing through framedProperly rather than \
+            by lowering relevanceScore.
             objectPresence is whether the visual evidence required by the criteria is present in the image.
-            framedProperly is an observation about framing only. It is not grounds for a verdict.
+            framedProperly is a separate observation about how that evidence sits in the frame. Report \
+            true when enough of the required evidence is inside the frame to observe it reliably, and \
+            false when it is cut off at a frame edge, too small, or occluded so that only part of it can \
+            be observed reliably. objectPresence and framedProperly are independent: evidence that is \
+            only partly in frame is present and framed poorly at the same time, and every combination of \
+            the two is allowed. framedProperly is not grounds for a verdict.
+            reasonCode reports how completely you could make the observations the criteria requires, not \
+            how good the evidence is. Observing with certainty that the required evidence is absent is \
+            still a complete observation.
             Report anomalyDetected=true only on concrete visual evidence, such as moire or scanline patterns \
             from re-photographing a screen, an explicit external platform watermark, or visible compositing \
             artifacts. Never report an anomaly from impressions such as the image looking like an \
