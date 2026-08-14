@@ -36,6 +36,15 @@ class VerificationMediaPolicyTest {
                         "verification-media/test", 100, "video/mp4"
                 )
         ));
+        // an object already shrunk by in-place sanitization is smaller than the upload intent
+        assertDoesNotThrow(() -> policy.requireInspection(
+                "verification-media/test",
+                "video/mp4",
+                100,
+                new VerificationMediaStorage.StoredMediaInspection(
+                        "verification-media/test", 64, "video/mp4"
+                )
+        ));
     }
 
     @Test
@@ -59,10 +68,19 @@ class VerificationMediaPolicyTest {
                 VerificationMediaCommandException.Reason.BINDING_MISMATCH,
                 new VerificationMediaStorage.StoredMediaInspection("verification-media/other", 100, "video/mp4")
         );
-        assertReason(
-                VerificationMediaCommandException.Reason.SIZE_MISMATCH,
-                new VerificationMediaStorage.StoredMediaInspection("verification-media/test", 99, "video/mp4")
+        // larger than the upload intent but still inside maxBytes, so this is a mismatch rather than oversize
+        VerificationMediaCommandException oversizeForIntent = assertThrows(
+                VerificationMediaCommandException.class,
+                () -> policy.requireInspection(
+                        "verification-media/test",
+                        "video/mp4",
+                        50,
+                        new VerificationMediaStorage.StoredMediaInspection(
+                                "verification-media/test", 100, "video/mp4"
+                        )
+                )
         );
+        assertEquals(VerificationMediaCommandException.Reason.SIZE_MISMATCH, oversizeForIntent.reason());
         assertReason(
                 VerificationMediaCommandException.Reason.CONTENT_TYPE_MISMATCH,
                 new VerificationMediaStorage.StoredMediaInspection("verification-media/test", 100, "image/jpeg")

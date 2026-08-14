@@ -1,4 +1,4 @@
-package com.allog.verification.analysis.service;
+package com.allog.verification.media;
 
 import org.junit.jupiter.api.Test;
 
@@ -70,25 +70,54 @@ class PhotoMetadataSanitizerTest {
     }
 
     /**
-     * Portrait phone photos carry Orientation != 1. Stripping APP1 removes that tag too, so this pins down
-     * exactly what changes: the decoded raster is untouched, only the orientation hint disappears.
+     * Portrait phone photos carry Orientation != 1. That hint decides whether the photo is read upright,
+     * so it is rewritten into a fresh APP1 while every other EXIF field is dropped.
      */
     @Test
-    void dropsOrientationHintWithoutChangingTheDecodedRaster() throws IOException {
-        byte[] tagged = jpegWithApp1(exifWithOrientation6());
+    void keepsOrientationWhileDroppingEveryOtherExifField() throws IOException {
+        byte[] tagged = jpegWithApp1(concat(EXIF_HEADER, EXIF_ORIENTATION_6, GPS_TAGS, CAMERA_TAGS));
 
         byte[] sanitized = PhotoMetadataSanitizer.strip("image/jpeg", tagged);
 
         BufferedImage before = decode(tagged);
         BufferedImage after = decode(sanitized);
         assertAll(
-                () -> assertTrue(contains(tagged, EXIF_ORIENTATION_6), "fixture must actually carry Orientation=6"),
-                () -> assertFalse(contains(sanitized, EXIF_ORIENTATION_6)),
-                // pixel bytes are copied verbatim, so every decoder that ignores EXIF sees an identical image
-                () -> assertArrayEquals(CLEAN_JPEG, sanitized),
+                () -> assertTrue(contains(tagged, GPS_TAGS), "fixture must actually carry GPS tags"),
+                () -> assertTrue(contains(sanitized, EXIF_ORIENTATION_6), "orientation must survive"),
+                () -> assertFalse(contains(sanitized, GPS_TAGS)),
+                () -> assertFalse(contains(sanitized, CAMERA_TAGS)),
+                // pixel bytes are copied verbatim, so the decoded image is untouched
                 () -> assertEquals(before.getWidth(), after.getWidth()),
                 () -> assertEquals(before.getHeight(), after.getHeight()),
                 () -> assertArrayEquals(raster(before), raster(after))
+        );
+    }
+
+    @Test
+    void rewritesOrientationIntoAnApp1OfItsOwn() {
+        byte[] sanitized = PhotoMetadataSanitizer.strip("image/jpeg", jpegWithApp1(exifWithOrientation6()));
+
+        // 36 bytes: APP1 marker + length + "Exif\0\0" + a TIFF block holding one Orientation entry
+        assertAll(
+                () -> assertEquals(CLEAN_JPEG.length + 36, sanitized.length),
+                () -> assertTrue(contains(sanitized, EXIF_ORIENTATION_6))
+        );
+    }
+
+    @Test
+    void addsNothingWhenTheOrientationIsAbsentOrDefault() {
+        byte[] defaultOrientation = EXIF_ORIENTATION_6.clone();
+        defaultOrientation[18] = 1;
+
+        assertAll(
+                () -> assertArrayEquals(CLEAN_JPEG, PhotoMetadataSanitizer.strip(
+                        "image/jpeg",
+                        jpegWithApp1(concat(EXIF_HEADER, defaultOrientation))
+                )),
+                () -> assertArrayEquals(CLEAN_JPEG, PhotoMetadataSanitizer.strip(
+                        "image/jpeg",
+                        jpegWithApp1(concat(EXIF_HEADER, GPS_TAGS))
+                ))
         );
     }
 
@@ -139,9 +168,22 @@ class PhotoMetadataSanitizerTest {
                         () -> PhotoMetadataSanitizer.strip("image/png", truncatedPng)),
                 // an unsanitizable format must never be forwarded as-is
                 () -> assertThrows(PhotoMetadataSanitizer.SanitizationException.class,
+                        () -> PhotoMetadataSanitizer.strip("image/heic", CLEAN_JPEG)),
+                () -> assertThrows(PhotoMetadataSanitizer.SanitizationException.class,
                         () -> PhotoMetadataSanitizer.strip("image/webp", CLEAN_JPEG)),
                 () -> assertThrows(PhotoMetadataSanitizer.SanitizationException.class,
                         () -> PhotoMetadataSanitizer.strip("video/mp4", CLEAN_JPEG))
+        );
+    }
+
+    /** iOS uploads land as HEIC unless the client converts. No decoder here, so it must stay blocked. */
+    @Test
+    void treatsHeicAsUnsupported() {
+        assertAll(
+                () -> assertFalse(PhotoMetadataSanitizer.supports("image/heic")),
+                () -> assertFalse(PhotoMetadataSanitizer.supports("image/heif")),
+                () -> assertTrue(PhotoMetadataSanitizer.supports("image/jpeg")),
+                () -> assertTrue(PhotoMetadataSanitizer.supports("image/png"))
         );
     }
 

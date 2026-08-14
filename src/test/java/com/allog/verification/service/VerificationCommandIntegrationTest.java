@@ -18,6 +18,7 @@ import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
+import com.allog.verification.media.TestPhotos;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
 import jakarta.persistence.EntityManager;
@@ -59,6 +60,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -83,6 +85,9 @@ class VerificationCommandIntegrationTest {
 
     private static final Instant SNAPSHOT_NOW = Instant.parse("2026-08-11T10:00:00Z");
     private static final Instant DEADLINE = Instant.parse("2026-08-11T14:00:00Z");
+    private static final byte[] GPS_TAGS = "GPSLatitude=37.5665".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+    /** Photo submissions are sanitized in place, so the fixture has to be a real image. */
+    private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
 
     @Autowired
     private VerificationCommandService service;
@@ -348,7 +353,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void pilotBoundSubmitPinsExactV1ProvenanceAndIsIdempotent() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
 
         VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
                 fixture.groupId(), fixture.userId()
@@ -374,7 +379,7 @@ class VerificationCommandIntegrationTest {
     void concurrentPilotBoundSubmitCreatesOneAnalysisWithOneExactProvenance() throws Exception {
         Fixture fixture = fixture(true);
         service.createOrGetCurrent(fixture.groupId(), fixture.userId());
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
 
         List<Instant> submittedAt = concurrently(() -> mediaSubmissionService.submitCurrent(
                 fixture.groupId(), fixture.userId()
@@ -410,7 +415,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void unknownTemplateRollsBackSubmissionAtomically() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         jdbcTemplate.update(
                 "update routine_group set verification_template_key = 'UNKNOWN_TEMPLATE' where id = ?",
                 fixture.groupId()
@@ -426,7 +431,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void templateCriteriaMismatchRollsBackSubmissionAtomically() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         jdbcTemplate.update(
                 "update routine_group set verification_criteria_reference = 'other-criteria@1' where id = ?",
                 fixture.groupId()
@@ -463,6 +468,52 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
+    void submitOverwritesTheStoredPhotoWithItsSanitizedBytes() {
+        Fixture fixture = fixture(true);
+        byte[] tagged = TestPhotos.withApp1(PHOTO, GPS_TAGS);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", tagged.length);
+        mediaStorage.stageContent(tagged);
+
+        VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(submitted.verificationId())
+                .orElseThrow();
+        byte[] stored = mediaStorage.storedContent();
+        assertAll(
+                () -> assertEquals(1, mediaStorage.overwriteCount()),
+                () -> assertFalse(contains(stored, GPS_TAGS), "S3 must not keep GPS metadata"),
+                () -> assertArrayEquals(PHOTO, stored),
+                () -> assertEquals(PHOTO.length, media.getConfirmedSizeBytes()),
+                () -> assertEquals(tagged.length, media.getExpectedSizeBytes()),
+                () -> assertEquals(VerificationStatus.SUBMITTED, submitted.status())
+        );
+    }
+
+    @Test
+    void submitRejectsAPhotoThatCannotBeSanitized() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        mediaStorage.stageContent(new byte[]{1, 2, 3, 4});
+
+        VerificationMediaCommandException exception = assertThrows(
+                VerificationMediaCommandException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+
+        assertAll(
+                () -> assertEquals(
+                        VerificationMediaCommandException.Reason.CONTENT_TYPE_MISMATCH,
+                        exception.reason()
+                ),
+                () -> assertEquals(0, mediaStorage.overwriteCount()),
+                () -> assertEquals(VerificationStatus.PENDING_UPLOAD, currentVerification(fixture).getStatus())
+        );
+    }
+
+    @Test
     void missingOrMismatchedStoredMediaCannotSubmit() {
         Fixture missingFixture = fixture();
         mediaUploadService.issueCurrentUpload(missingFixture.groupId(), missingFixture.userId(), "video/mp4", 100);
@@ -476,7 +527,7 @@ class VerificationCommandIntegrationTest {
 
         Fixture mismatchFixture = fixture();
         mediaUploadService.issueCurrentUpload(mismatchFixture.groupId(), mismatchFixture.userId(), "video/mp4", 100);
-        mediaStorage.replaceLastInspection(99, "image/jpeg");
+        mediaStorage.replaceLastInspection(101, "video/mp4");
 
         VerificationMediaCommandException mismatch = assertThrows(
                 VerificationMediaCommandException.class,
@@ -801,11 +852,19 @@ class VerificationCommandIntegrationTest {
         }
     }
 
+    /** ISO-8859-1 maps every byte 1:1, so this is an exact byte-subsequence search. */
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        return new String(haystack, java.nio.charset.StandardCharsets.ISO_8859_1)
+                .contains(new String(needle, java.nio.charset.StandardCharsets.ISO_8859_1));
+    }
+
     static final class TestMediaStorage implements VerificationMediaStorage {
 
         private final Map<String, StoredMediaInspection> media = new ConcurrentHashMap<>();
+        private final Map<String, byte[]> contents = new ConcurrentHashMap<>();
         private final List<String> issuedKeys = new CopyOnWriteArrayList<>();
         private final AtomicInteger inspectCount = new AtomicInteger();
+        private final AtomicInteger overwriteCount = new AtomicInteger();
         private final AtomicReference<Runnable> beforeInspect = new AtomicReference<>(() -> {
         });
         private volatile boolean issueTransactionActive;
@@ -821,6 +880,12 @@ class VerificationCommandIntegrationTest {
             issueTransactionActive = TransactionSynchronizationManager.isActualTransactionActive();
             issuedKeys.add(objectKey);
             media.put(objectKey, new StoredMediaInspection(objectKey, sizeBytes, contentType));
+            contents.put(
+                    objectKey,
+                    "image/jpeg".equals(contentType) && sizeBytes == PHOTO.length
+                            ? PHOTO.clone()
+                            : new byte[Math.toIntExact(sizeBytes)]
+            );
             return new UploadGrant(
                     URI.create("https://example.invalid/upload"),
                     "PUT",
@@ -841,8 +906,42 @@ class VerificationCommandIntegrationTest {
             return inspection;
         }
 
+        @Override
+        public StoredMedia acquire(String objectKey, long maxBytes) {
+            byte[] content = contents.get(objectKey);
+            StoredMediaInspection inspection = media.get(objectKey);
+            if (content == null || inspection == null) {
+                throw new StorageException(StorageException.Reason.NOT_FOUND, "missing test object");
+            }
+            return new StoredMedia(objectKey, content.length, inspection.contentType(), content);
+        }
+
+        @Override
+        public void overwrite(String objectKey, String contentType, byte[] content) {
+            overwriteCount.incrementAndGet();
+            contents.put(objectKey, content.clone());
+            media.put(objectKey, new StoredMediaInspection(objectKey, content.length, contentType));
+        }
+
+        /** Replaces what the last issued key actually holds, so a test can upload real photo bytes. */
+        void stageContent(byte[] content) {
+            String key = issuedKeys.getLast();
+            contents.put(key, content.clone());
+            media.put(key, new StoredMediaInspection(key, content.length, media.get(key).contentType()));
+        }
+
+        byte[] storedContent() {
+            return contents.get(issuedKeys.getLast()).clone();
+        }
+
+        int overwriteCount() {
+            return overwriteCount.get();
+        }
+
         void reset() {
             media.clear();
+            contents.clear();
+            overwriteCount.set(0);
             issuedKeys.clear();
             inspectCount.set(0);
             beforeInspect.set(() -> {
@@ -878,6 +977,7 @@ class VerificationCommandIntegrationTest {
         void replaceLastInspection(long sizeBytes, String contentType) {
             String key = issuedKeys.getLast();
             media.put(key, new StoredMediaInspection(key, sizeBytes, contentType));
+            contents.put(key, new byte[Math.toIntExact(sizeBytes)]);
         }
 
         StoredMediaInspection lastInspection() {

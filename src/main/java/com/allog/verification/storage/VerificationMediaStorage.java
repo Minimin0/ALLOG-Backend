@@ -23,6 +23,17 @@ public interface VerificationMediaStorage {
         );
     }
 
+    /**
+     * Replaces the bytes stored under an existing key. Only ever writes the key it is given, so the
+     * sanitized image supersedes the original instead of being kept alongside it.
+     */
+    default void overwrite(String objectKey, String contentType, byte[] content) {
+        throw new StorageException(
+                StorageException.Reason.UNAVAILABLE,
+                "verification media overwrite is unavailable"
+        );
+    }
+
     record UploadGrant(
             URI uri,
             String method,

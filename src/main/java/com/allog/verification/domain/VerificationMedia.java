@@ -86,8 +86,9 @@ public class VerificationMedia extends BaseTimeEntity {
         if (actualSizeBytes <= 0) {
             throw new IllegalArgumentException("actualSizeBytes must be positive");
         }
-        if (actualSizeBytes != expectedSizeBytes) {
-            throw new IllegalStateException("confirmed media size must equal expected size");
+        // Upper bound, not equality: in-place EXIF sanitization only ever removes bytes from the object.
+        if (actualSizeBytes > expectedSizeBytes) {
+            throw new IllegalStateException("confirmed media size must not exceed expected size");
         }
         Instant confirmationTime = Objects.requireNonNull(
                 Objects.requireNonNull(clock, "clock must not be null").instant(),

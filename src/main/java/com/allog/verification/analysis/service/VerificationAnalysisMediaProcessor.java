@@ -3,6 +3,7 @@ package com.allog.verification.analysis.service;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationCriteria;
+import com.allog.verification.media.PhotoMetadataSanitizer;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;

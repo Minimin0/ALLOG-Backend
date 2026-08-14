@@ -30,6 +30,7 @@ import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult
 import com.allog.verification.analysis.service.VerificationAnalysisWorker;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
+import com.allog.verification.media.TestPhotos;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
@@ -49,11 +50,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -102,7 +98,7 @@ class VerificationAnalysisPersistenceTest {
     private static final Instant WORKER_NOW = Instant.parse("2026-08-14T00:00:00Z");
     private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
     /** Provider-bound media must survive EXIF/GPS sanitization, so it has to be a real image. */
-    private static final byte[] PHOTO = jpeg();
+    private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
 
     @Autowired
     private VerificationAnalysisRepository repository;
@@ -1383,18 +1379,6 @@ class VerificationAnalysisPersistenceTest {
                         VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
                 )
         );
-    }
-
-    private static byte[] jpeg() {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try {
-            if (!ImageIO.write(new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB), "jpeg", out)) {
-                throw new IllegalStateException("no jpeg writer available");
-            }
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
-        return out.toByteArray();
     }
 
     private String verificationStatus(Long analysisId) {

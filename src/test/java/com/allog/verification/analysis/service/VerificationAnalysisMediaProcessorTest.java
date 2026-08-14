@@ -3,6 +3,7 @@ package com.allog.verification.analysis.service;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationCriteria;
+import com.allog.verification.media.TestPhotos;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
 import org.junit.jupiter.api.Test;
@@ -11,11 +12,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -42,7 +38,7 @@ class VerificationAnalysisMediaProcessorTest {
             1
     );
     private static final byte[] GPS_TAGS = "GPSLatitude=37.5665".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] PHOTO = jpeg();
+    private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
     private static final VerificationAnalysisInput INPUT = new VerificationAnalysisInput(
             CLAIM.analysisId(),
             CLAIM.analysisRequestId(),
@@ -99,7 +95,7 @@ class VerificationAnalysisMediaProcessorTest {
 
     @Test
     void providerBoundBytesCarryNoExifGpsMetadata() {
-        byte[] tagged = jpegWithGpsApp1();
+        byte[] tagged = TestPhotos.withApp1(PHOTO, GPS_TAGS);
         VerificationAnalysisInput taggedInput = new VerificationAnalysisInput(
                 INPUT.analysisId(),
                 INPUT.analysisRequestId(),
@@ -339,32 +335,6 @@ class VerificationAnalysisMediaProcessorTest {
         VerificationAnalysisMediaProcessor.Failure failure =
                 (VerificationAnalysisMediaProcessor.Failure) outcome;
         assertEquals(expected, failure.failureCode());
-    }
-
-    private static byte[] jpeg() {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try {
-            if (!ImageIO.write(new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB), "jpeg", out)) {
-                throw new IllegalStateException("no jpeg writer available");
-            }
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
-        return out.toByteArray();
-    }
-
-    /** Splices an APP1 segment carrying GPS text straight after the SOI marker. */
-    private static byte[] jpegWithGpsApp1() {
-        int length = GPS_TAGS.length + 2;
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(PHOTO, 0, 2);
-        out.write(0xFF);
-        out.write(0xE1);
-        out.write(length >>> 8);
-        out.write(length);
-        out.writeBytes(GPS_TAGS);
-        out.write(PHOTO, 2, PHOTO.length - 2);
-        return out.toByteArray();
     }
 
     /** ISO-8859-1 maps every byte 1:1, so this is an exact byte-subsequence search. */

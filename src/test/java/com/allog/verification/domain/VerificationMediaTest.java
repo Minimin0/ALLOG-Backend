@@ -39,13 +39,27 @@ class VerificationMediaTest {
         VerificationMedia media = media();
 
         assertThrows(IllegalArgumentException.class, () -> media.confirm(0, Clock.systemUTC()));
-        assertThrows(IllegalStateException.class, () -> media.confirm(99, Clock.systemUTC()));
+        assertThrows(IllegalStateException.class, () -> media.confirm(101, Clock.systemUTC()));
         assertThrows(NullPointerException.class, () -> media.confirm(100, null));
         assertFalse(media.isConfirmed());
 
         media.confirm(100, Clock.fixed(CONFIRMED_AT, ZoneOffset.UTC));
 
-        assertThrows(IllegalStateException.class, () -> media.confirm(101, Clock.systemUTC()));
+        assertThrows(IllegalStateException.class, () -> media.confirm(99, Clock.systemUTC()));
+    }
+
+    /** In-place EXIF sanitization shrinks the stored object, so a smaller confirmation is legitimate. */
+    @Test
+    void confirmsASanitizedObjectSmallerThanTheUploadIntent() {
+        VerificationMedia media = media();
+
+        media.confirm(64, Clock.fixed(CONFIRMED_AT, ZoneOffset.UTC));
+
+        assertAll(
+                () -> assertTrue(media.isConfirmed()),
+                () -> assertEquals(64L, media.getConfirmedSizeBytes()),
+                () -> assertEquals(100L, media.getExpectedSizeBytes())
+        );
     }
 
     private VerificationMedia media() {

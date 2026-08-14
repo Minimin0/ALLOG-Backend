@@ -3,6 +3,7 @@ package com.allog.verification.storage.s3;
 import com.allog.verification.storage.VerificationMediaStorage;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -153,6 +154,34 @@ public final class S3VerificationMediaStorage implements VerificationMediaStorag
             }
             throw configuration("verification media storage request was rejected", exception);
         } catch (SdkClientException | IOException exception) {
+            throw unavailable("verification media storage is unavailable", exception);
+        }
+    }
+
+    @Override
+    public void overwrite(String objectKey, String contentType, byte[] content) {
+        String expectedObjectKey = requireText(objectKey, "objectKey");
+        String expectedContentType = requireText(contentType, "contentType");
+        Objects.requireNonNull(content, "content must not be null");
+        if (content.length == 0) {
+            throw new IllegalArgumentException("content must not be empty");
+        }
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(expectedObjectKey)
+                            .contentType(expectedContentType)
+                            .contentLength((long) content.length)
+                            .build(),
+                    RequestBody.fromBytes(content)
+            );
+        } catch (S3Exception exception) {
+            if (exception.statusCode() >= 500) {
+                throw unavailable("verification media storage is unavailable", exception);
+            }
+            throw configuration("verification media storage request was rejected", exception);
+        } catch (SdkClientException exception) {
             throw unavailable("verification media storage is unavailable", exception);
         }
     }
