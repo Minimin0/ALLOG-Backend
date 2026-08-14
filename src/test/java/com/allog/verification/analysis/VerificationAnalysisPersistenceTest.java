@@ -49,6 +49,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -96,6 +101,8 @@ class VerificationAnalysisPersistenceTest {
     private static final Instant COMPLETED_AT = Instant.parse("2026-08-11T10:01:00Z");
     private static final Instant WORKER_NOW = Instant.parse("2026-08-14T00:00:00Z");
     private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    /** Provider-bound media must survive EXIF/GPS sanitization, so it has to be a real image. */
+    private static final byte[] PHOTO = jpeg();
 
     @Autowired
     private VerificationAnalysisRepository repository;
@@ -1130,13 +1137,13 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void backendDecisionCanCombineMediaObservationAndCompleteWorkerWithoutExternalTransaction() {
-        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", PHOTO.length, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
-                4,
+                PHOTO.length,
                 "image/jpeg",
-                new byte[]{1, 2, 3, 4}
+                PHOTO
         ));
         AtomicBoolean providerTransaction = new AtomicBoolean(true);
         VerificationAnalysisProvider provider = (criteria, evidence) -> {
@@ -1183,13 +1190,13 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void staleMediaProcessorResultCannotOverwriteCurrentAttempt() throws Exception {
-        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", PHOTO.length, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
-                4,
+                PHOTO.length,
                 "image/jpeg",
-                new byte[]{1, 2, 3, 4}
+                PHOTO
         ));
         CountDownLatch providerStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -1376,6 +1383,18 @@ class VerificationAnalysisPersistenceTest {
                         VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
                 )
         );
+    }
+
+    private static byte[] jpeg() {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            if (!ImageIO.write(new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB), "jpeg", out)) {
+                throw new IllegalStateException("no jpeg writer available");
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+        return out.toByteArray();
     }
 
     private String verificationStatus(Long analysisId) {

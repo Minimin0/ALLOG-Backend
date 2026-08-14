@@ -67,6 +67,16 @@ public final class VerificationAnalysisMediaProcessor {
             return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
         }
 
+        // Privacy hard gate: provider-bound bytes must never carry EXIF/GPS. Fail closed - anything the
+        // sanitizer cannot prove clean is rejected instead of forwarded.
+        requireNoTransaction("media sanitization");
+        final byte[] sanitizedContent;
+        try {
+            sanitizedContent = PhotoMetadataSanitizer.strip(input.contentType(), media.content());
+        } catch (PhotoMetadataSanitizer.SanitizationException exception) {
+            return new Failure(VerificationAnalysisFailureCode.BAD_REQUEST);
+        }
+
         requireNoTransaction("provider execution");
         final VerificationAnalysisProvider.Result result;
         try {
@@ -76,7 +86,7 @@ public final class VerificationAnalysisMediaProcessor {
                             new VerificationAnalysisProvider.Evidence(
                                     modality,
                                     input.contentType(),
-                                    media.content()
+                                    sanitizedContent
                             )
                     ),
                     "provider result must not be null"

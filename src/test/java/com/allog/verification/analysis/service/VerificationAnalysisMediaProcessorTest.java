@@ -11,13 +11,21 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -33,6 +41,8 @@ class VerificationAnalysisMediaProcessorTest {
             UUID.randomUUID(),
             1
     );
+    private static final byte[] GPS_TAGS = "GPSLatitude=37.5665".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] PHOTO = jpeg();
     private static final VerificationAnalysisInput INPUT = new VerificationAnalysisInput(
             CLAIM.analysisId(),
             CLAIM.analysisRequestId(),
@@ -41,14 +51,14 @@ class VerificationAnalysisMediaProcessorTest {
             20L,
             "verification-media/test",
             "image/jpeg",
-            4
+            PHOTO.length
     );
     private static final VerificationMediaStorage.StoredMedia MEDIA =
             new VerificationMediaStorage.StoredMedia(
                     INPUT.objectKey(),
                     INPUT.sizeBytes(),
                     INPUT.contentType(),
-                    new byte[]{1, 2, 3, 4}
+                    PHOTO
             );
     private static final VerificationTemplateCatalog CATALOG = new VerificationTemplateCatalog();
     private static final VerificationCriteria CRITERIA =
@@ -76,7 +86,7 @@ class VerificationAnalysisMediaProcessorTest {
             VerificationAnalysisProvider.Evidence evidence = invocation.getArgument(1);
             assertEquals(VerificationCriteria.MediaModality.PHOTO, evidence.modality());
             assertEquals("image/jpeg", evidence.contentType());
-            assertArrayEquals(new byte[]{1, 2, 3, 4}, evidence.content());
+            assertArrayEquals(PHOTO, evidence.content());
             return PROVIDER_RESULT;
         });
 
@@ -85,6 +95,66 @@ class VerificationAnalysisMediaProcessorTest {
                 processor().process(CLAIM)
         );
         verify(provider).analyze(eq(CRITERIA.providerContract()), any());
+    }
+
+    @Test
+    void providerBoundBytesCarryNoExifGpsMetadata() {
+        byte[] tagged = jpegWithGpsApp1();
+        VerificationAnalysisInput taggedInput = new VerificationAnalysisInput(
+                INPUT.analysisId(),
+                INPUT.analysisRequestId(),
+                INPUT.attemptCount(),
+                INPUT.criteriaReference(),
+                INPUT.verificationId(),
+                INPUT.objectKey(),
+                INPUT.contentType(),
+                tagged.length
+        );
+        when(inputLoader.load(CLAIM)).thenReturn(taggedInput);
+        when(storage.acquire(taggedInput.objectKey(), taggedInput.sizeBytes()))
+                .thenReturn(new VerificationMediaStorage.StoredMedia(
+                        taggedInput.objectKey(),
+                        taggedInput.sizeBytes(),
+                        taggedInput.contentType(),
+                        tagged
+                ));
+        when(provider.analyze(any(), any())).thenAnswer(invocation -> {
+            VerificationAnalysisProvider.Evidence evidence = invocation.getArgument(1);
+            assertTrue(contains(tagged, GPS_TAGS), "fixture must actually carry GPS tags");
+            assertFalse(contains(evidence.content(), GPS_TAGS), "provider must never receive GPS metadata");
+            assertArrayEquals(PHOTO, evidence.content());
+            return PROVIDER_RESULT;
+        });
+
+        assertEquals(
+                new VerificationAnalysisMediaProcessor.Observed(CRITERIA, PROVIDER_RESULT),
+                processor().process(CLAIM)
+        );
+    }
+
+    @Test
+    void mapsUnsanitizablePhotoToBadRequestWithoutProviderCall() {
+        VerificationAnalysisInput corruptedInput = new VerificationAnalysisInput(
+                INPUT.analysisId(),
+                INPUT.analysisRequestId(),
+                INPUT.attemptCount(),
+                INPUT.criteriaReference(),
+                INPUT.verificationId(),
+                INPUT.objectKey(),
+                INPUT.contentType(),
+                4
+        );
+        when(inputLoader.load(CLAIM)).thenReturn(corruptedInput);
+        when(storage.acquire(corruptedInput.objectKey(), corruptedInput.sizeBytes()))
+                .thenReturn(new VerificationMediaStorage.StoredMedia(
+                        corruptedInput.objectKey(),
+                        corruptedInput.sizeBytes(),
+                        corruptedInput.contentType(),
+                        new byte[]{1, 2, 3, 4}
+                ));
+
+        assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
+        verify(provider, never()).analyze(any(), any());
     }
 
     @Test
@@ -105,13 +175,13 @@ class VerificationAnalysisMediaProcessorTest {
                         INPUT.objectKey(),
                         INPUT.sizeBytes() + 1,
                         INPUT.contentType(),
-                        new byte[]{1, 2, 3, 4, 5}
+                        Arrays.copyOf(PHOTO, PHOTO.length + 1)
                 ))
                 .thenReturn(new VerificationMediaStorage.StoredMedia(
                         videoInput.objectKey(),
                         videoInput.sizeBytes(),
                         videoInput.contentType(),
-                        new byte[]{1, 2, 3, 4}
+                        PHOTO
                 ));
 
         assertFailure(VerificationAnalysisFailureCode.BAD_REQUEST, processor().process(CLAIM));
@@ -269,6 +339,38 @@ class VerificationAnalysisMediaProcessorTest {
         VerificationAnalysisMediaProcessor.Failure failure =
                 (VerificationAnalysisMediaProcessor.Failure) outcome;
         assertEquals(expected, failure.failureCode());
+    }
+
+    private static byte[] jpeg() {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            if (!ImageIO.write(new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB), "jpeg", out)) {
+                throw new IllegalStateException("no jpeg writer available");
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+        return out.toByteArray();
+    }
+
+    /** Splices an APP1 segment carrying GPS text straight after the SOI marker. */
+    private static byte[] jpegWithGpsApp1() {
+        int length = GPS_TAGS.length + 2;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(PHOTO, 0, 2);
+        out.write(0xFF);
+        out.write(0xE1);
+        out.write(length >>> 8);
+        out.write(length);
+        out.writeBytes(GPS_TAGS);
+        out.write(PHOTO, 2, PHOTO.length - 2);
+        return out.toByteArray();
+    }
+
+    /** ISO-8859-1 maps every byte 1:1, so this is an exact byte-subsequence search. */
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        return new String(haystack, StandardCharsets.ISO_8859_1)
+                .contains(new String(needle, StandardCharsets.ISO_8859_1));
     }
 
     private static VerificationAnalysisProvider.Result providerResult() {
