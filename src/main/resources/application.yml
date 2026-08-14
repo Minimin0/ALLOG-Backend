@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: allog-backend
+  datasource:
+    url: "jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:allog}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+    username: "${DB_USERNAME:allog}"
+    password: "${DB_PASSWORD:}"
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+ai:
+  openai:
+    api-key: "${OPENAI_API_KEY:}"
+  coach:
+    model: "${AI_COACH_MODEL:}"
+    timeout: "${AI_COACH_TIMEOUT:3s}"
+
+allog:
+  auth:
+    firebase:
+      enabled: "${FIREBASE_AUTH_ENABLED:false}"
+      project-id: "${FIREBASE_PROJECT_ID:}"
+  verification:
+    analysis:
+      anthropic:
+        enabled: "${VERIFICATION_ANALYSIS_ANTHROPIC_ENABLED:false}"
+        api-key: "${ANTHROPIC_API_KEY:}"
+        model: "${VERIFICATION_ANALYSIS_ANTHROPIC_MODEL:}"
+        request-timeout: "${VERIFICATION_ANALYSIS_ANTHROPIC_REQUEST_TIMEOUT:30s}"
+    media:
+      enabled: "${VERIFICATION_MEDIA_ENABLED:false}"
+      region: "${AWS_REGION:}"
+      bucket: "${VERIFICATION_MEDIA_BUCKET:}"
+      max-bytes: "${VERIFICATION_MEDIA_MAX_BYTES:0}"
+      upload-expiry: "${VERIFICATION_MEDIA_UPLOAD_EXPIRY:0s}"
+      allowed-content-types: "${VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES:}"

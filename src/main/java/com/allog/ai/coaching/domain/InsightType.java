@@ -1,0 +1,12 @@
+package com.allog.ai.coaching.domain;
+
+public enum InsightType {
+    VERIFICATION_PENDING,
+    TODAY_NOT_COMPLETED,
+    DEADLINE_APPROACHING,
+    STREAK_CONTINUING,
+    STREAK_RECORD,
+    COMPLETION_RISK,
+    GROUP_GOAL_NEAR,
+    IMPROVED_FROM_PREVIOUS
+}

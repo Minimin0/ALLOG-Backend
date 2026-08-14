@@ -1,0 +1,2 @@
+executionId	model	criteriaReference	caseId	humanLabel	objectPresence	relevanceScore	anomalyDetected	framedProperly	reasonCode	failureCode
+20260814T113749Z	claude-sonnet-5	meal-photo-record@1	rephotographed-screen-01	POTENTIAL_INTEGRITY_ANOMALY	true	0.9	true	true	POTENTIAL_INTEGRITY_ANOMALY	-
