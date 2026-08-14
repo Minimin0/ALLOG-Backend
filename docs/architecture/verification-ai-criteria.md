@@ -190,15 +190,90 @@ Heart/Reward/Ranking/Progress 반영은 이 계약에 포함되지 않으며 별
 | 5 | Provider failure | DecisionPolicy 미호출, Recommendation 없음 |
 | 6 | record-only(criteria 없음) | DecisionPolicy 미호출 |
 
+## Recommendation → Verification lifecycle (MVP)
+
+STEP 6A-9E-J.5-R에서 확정한 Product 계약이다. **아직 구현하지 않았다.**
+
+`AnalysisRecommendation`과 `VerificationStatus`는 이름이 겹치는 값(`REVIEW_REQUIRED`)이 있어도 서로
+다른 enum이다. 전자는 backend policy 출력이고 후자는 사용자 verification lifecycle 상태다. 아래가 둘
+사이의 mapping이다.
+
+### 원칙
+
+**AI는 사용자를 자동으로 최종 탈락시키지 않는다.** AI Recommendation으로 인한
+`VerificationStatus.REJECTED` 전환은 이 계약에 없다. 운영 방향은 PASS / guided retry /
+unresolved hold 셋뿐이다. 동시에 무한 retry도 허용하지 않는다.
+
+### Initial attempt
+
+| `AnalysisRecommendation` | `VerificationStatus` |
+|---|---|
+| `PASS` | `APPROVED` |
+| `REJECT_CANDIDATE` | `RETRY_REQUIRED` |
+| `REVIEW_REQUIRED` | `RETRY_REQUIRED` |
+
+첫 회차에서는 anomaly가 관찰되어도 바로 hold하지 않고 clean evidence를 한 번 더 요청한다. 부정행위
+확정이 아니라 추가 확인 요청이다.
+
+### Retry attempt (최대 1회)
+
+| `AnalysisRecommendation` | `VerificationStatus` |
+|---|---|
+| `PASS` | `APPROVED` |
+| `REJECT_CANDIDATE` | `REVIEW_REQUIRED` (hold) |
+| `REVIEW_REQUIRED` | `REVIEW_REQUIRED` (hold) |
+
+동일 scheduled opportunity 기준 **최초 제출 1회 + retry 1회 = 최대 2회 평가**. 추가 자동 retry는 없다.
+
+### HOLD semantics
+
+`VerificationStatus.REVIEW_REQUIRED`는 MVP에서 사실상 terminal이다. 자동 APPROVED 아님, 자동
+REJECTED 아님, 자동 reward 없음, Progress 인정 안 됨, 추가 자동 Provider 호출 없음, 사용자 대상
+fraud 확정 문구 없음.
+
+**KNOWN MVP OPERATIONAL LIMITATION**: staff console·review queue·admin dashboard·approval API를 만들지
+않으므로, hold된 Verification은 운영 리뷰 수단이 생길 때까지 미결로 남는다. `PersonalProgressCalculator`
+는 `REVIEW_REQUIRED`를 `PENDING_DECISION`으로 분류하며, 이는 위 hold 의미와 일치한다.
+
+### Provider failure는 retry를 소비하지 않는다
+
+`AUTHENTICATION` / `RATE_LIMITED` / `PROVIDER_5XX` / `TIMEOUT` / `NETWORK` / `INVALID_RESPONSE` /
+`INTERRUPTED`는 사용자 evidence에 대한 판단이 아니다. Recommendation을 만들지 않으므로 위 mapping에
+진입하지 않고, 사용자 retry 횟수도 소비하지 않는다. Provider 재시도는 infrastructure 정책이다.
+
+`VerificationAnalysis.attemptCount`는 **worker claim fencing/stale recovery용**이며 사용자 재제출
+횟수가 아니다. 두 개념을 섞지 않는다.
+
+### 구현 전 해소해야 할 blocker
+
+이 계약은 현재 코드로 바로 구현할 수 없다. 확인된 blocker는 다음과 같다.
+
+| # | 위치 | 내용 |
+|---|---|---|
+| 1 | `VerificationMedia` | `@OneToOne` + `UNIQUE(verification_id)`, `confirm()`은 재확인 불가. **재촬영 사진을 담을 자리가 없다** |
+| 2 | `VerificationAnalysis` | `@OneToOne` + `UNIQUE(verification_id)`. **두 번째 분석 row를 만들 수 없다** |
+| 3 | 전역 | 사용자 재제출 횟수를 표현하는 field가 없다 (`MISSING USER RETRY ATTEMPT MODEL`) |
+| 4 | `VerificationCommandService` | `RETRY_REQUIRED`에서 3곳이 `"user retry is not enabled"`로 차단 |
+| 5 | `PersonalProgressCalculator` | `RETRY_REQUIRED`를 만나면 예외를 던짐 |
+| 6 | deadline | retry가 당일 deadline을 넘을 수 있는지에 대한 정책이 없다 |
+
+`Verification` 자체는 재사용 가능하다. `UNIQUE(group_member_id, routine_schedule_id, scheduled_date)`
+로 opportunity 당 1 row이고, `submit()`이 이미 `RETRY_REQUIRED → SUBMITTED`를 허용한다. 즉 상태
+기계는 준비되어 있고, 막힌 것은 evidence/analysis 저장 구조와 명시적 차단이다.
+
+기존 evidence는 감사 추적을 위해 삭제·덮어쓰기 하지 않는다. blocker 1·2의 해소 방향(1:N 전환 등)은
+별도 STEP에서 결정한다.
+
 ## Deferred decisions
 
 - Backend DecisionPolicy 구현(계약은 위에서 확정, threshold는 계속 NONE)
 - Production AI Provider와 Scheduler
-- retry UX. 현재 `RETRY_REQUIRED`는 `PersonalProgressCalculator`가 예외로 거부하고
-  `VerificationCommandService`가 "user retry is not enabled"로 막는다. `REJECT_CANDIDATE`를
-  실제 재촬영 흐름에 연결하려면 두 곳을 함께 열어야 한다.
-- `REVIEW_REQUIRED` 이후의 운영 처리. 현재 staff/admin review 수단이 없어 해당 Verification은
-  Progress에서 `PENDING_DECISION`으로 계속 남는다.
+- guided retry 구현. 계약은 위에서 확정했고, 남은 것은 blocker 1~6이다.
+- retry가 당일 deadline을 넘을 수 있는지: (A) original deadline 유지, (B) retry grace period,
+  (C) 즉시 1회만 허용. 미결정이며 임의로 정하지 않는다.
+- `REVIEW_REQUIRED` hold를 해소할 운영 수단(사람 또는 도구).
+- 최종 거절 authority. 현재 `Verification.reject()`를 호출하는 production 코드는 없다.
+- Reward/Heart/Ranking. 해당 system이 아직 존재하지 않으므로 `APPROVED` 이후 정책은 미정이다.
 - Evaluation dataset의 실제 PHOTO asset과 수집된 observation. Human Label 계약과 offline threshold
   sweep harness는 [Meal PHOTO Evaluation Dataset and Human Label Contract](verification-evaluation-dataset.md)에
   test scope로 존재하며, selected threshold는 여전히 없다.
