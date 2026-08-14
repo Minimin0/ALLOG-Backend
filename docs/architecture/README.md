@@ -9,5 +9,6 @@
 - [Membership Lifecycle and Group Activation](membership-lifecycle.md)
 - [Production AI Coach Application](production-ai-coach.md)
 - [Verification AI Criteria and Observation Contract](verification-ai-criteria.md)
+- [Meal PHOTO Evaluation Dataset and Human Label Contract](verification-evaluation-dataset.md)
 
 확정되지 않은 Product 정책은 각 문서에서 구현 계약과 분리합니다.

@@ -103,6 +103,8 @@ provider-neutral evidence requirement, modality, normalized Content-Type과 medi
 - Backend DecisionPolicy와 threshold
 - Production AI Provider와 Scheduler
 - retry UX
-- Evaluation dataset과 human labels
+- Evaluation dataset의 실제 PHOTO asset과 수집된 observation. Human Label 계약과 offline threshold
+  sweep harness는 [Meal PHOTO Evaluation Dataset and Human Label Contract](verification-evaluation-dataset.md)에
+  test scope로 존재하며, selected threshold는 여전히 없다.
 - category taxonomy
 - 기록형 Group의 Progress/reward 세부 정책
