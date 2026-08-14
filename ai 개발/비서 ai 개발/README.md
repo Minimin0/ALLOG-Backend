@@ -2,7 +2,7 @@
 
 ## 1. 기존 프로젝트 분석 결과
 
-- 위치: `/Users/choimin/Documents/해커톤/ALLOG/Backend`
+- 위치: Backend repository 루트 (각자 clone 경로)
 - 현재 기술 스택: 미정. `README.md`에 Spring Boot 등 서버 프레임워크는 팀 합의 후 초기화한다고 명시되어 있음.
 - 현재 소스 구조: `src/README.md`만 존재하며 Entity, Controller, Service, Repository, DTO, Exception, Auth, Migration, Test 구조는 아직 없음.
 - 환경 변수 방식: `.env.example` 기반.
