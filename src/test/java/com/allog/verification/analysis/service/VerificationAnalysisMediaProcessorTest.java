@@ -203,6 +203,24 @@ class VerificationAnalysisMediaProcessorTest {
     }
 
     @Test
+    void mapsClassifiedProviderFailuresToTheirFailureCode() {
+        when(inputLoader.load(CLAIM)).thenReturn(INPUT);
+        when(storage.acquire(INPUT.objectKey(), INPUT.sizeBytes())).thenReturn(MEDIA);
+        when(provider.analyze(any(), any()))
+                .thenThrow(new VerificationAnalysisProvider.ProviderException(
+                        VerificationAnalysisFailureCode.RATE_LIMITED,
+                        "rate limited"
+                ))
+                .thenThrow(new VerificationAnalysisProvider.ProviderException(
+                        VerificationAnalysisFailureCode.INTERRUPTED,
+                        "interrupted"
+                ));
+
+        assertFailure(VerificationAnalysisFailureCode.RATE_LIMITED, processor().process(CLAIM));
+        assertFailure(VerificationAnalysisFailureCode.INTERRUPTED, processor().process(CLAIM));
+    }
+
+    @Test
     void doesNotGuessMissingConfigurationOrUnexpectedProviderFailures() {
         VerificationMediaStorage.StorageException missing = new VerificationMediaStorage.StorageException(
                 VerificationMediaStorage.StorageException.Reason.NOT_FOUND,

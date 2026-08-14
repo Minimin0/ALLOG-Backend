@@ -68,17 +68,22 @@ public final class VerificationAnalysisMediaProcessor {
         }
 
         requireNoTransaction("provider execution");
-        VerificationAnalysisProvider.Result result = Objects.requireNonNull(
-                provider.analyze(
-                        criteria.providerContract(),
-                        new VerificationAnalysisProvider.Evidence(
-                                modality,
-                                input.contentType(),
-                                media.content()
-                        )
-                ),
-                "provider result must not be null"
-        );
+        final VerificationAnalysisProvider.Result result;
+        try {
+            result = Objects.requireNonNull(
+                    provider.analyze(
+                            criteria.providerContract(),
+                            new VerificationAnalysisProvider.Evidence(
+                                    modality,
+                                    input.contentType(),
+                                    media.content()
+                            )
+                    ),
+                    "provider result must not be null"
+            );
+        } catch (VerificationAnalysisProvider.ProviderException exception) {
+            return new Failure(exception.failureCode());
+        }
         if (result.observation().reasonCode()
                 == VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
                 && criteria.requiredObservations().stream().anyMatch(type -> !result.observation().hasValue(type))) {

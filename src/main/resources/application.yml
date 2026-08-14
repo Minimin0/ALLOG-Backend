@@ -25,6 +25,12 @@ allog:
       enabled: "${FIREBASE_AUTH_ENABLED:false}"
       project-id: "${FIREBASE_PROJECT_ID:}"
   verification:
+    analysis:
+      anthropic:
+        enabled: "${VERIFICATION_ANALYSIS_ANTHROPIC_ENABLED:false}"
+        api-key: "${ANTHROPIC_API_KEY:}"
+        model: "${VERIFICATION_ANALYSIS_ANTHROPIC_MODEL:}"
+        request-timeout: "${VERIFICATION_ANALYSIS_ANTHROPIC_REQUEST_TIMEOUT:30s}"
     media:
       enabled: "${VERIFICATION_MEDIA_ENABLED:false}"
       region: "${AWS_REGION:}"

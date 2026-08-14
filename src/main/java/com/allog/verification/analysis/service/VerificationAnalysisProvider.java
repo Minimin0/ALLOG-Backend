@@ -1,5 +1,6 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationCriteria;
 
@@ -35,6 +36,29 @@ public interface VerificationAnalysisProvider {
                 throw new IllegalArgumentException("providerModel must be at most 100 characters");
             }
             Objects.requireNonNull(observation, "observation must not be null");
+        }
+    }
+
+    /**
+     * Signals a provider attempt failure already classified into the production failure taxonomy.
+     * Messages must never carry provider response bodies or credentials.
+     */
+    final class ProviderException extends RuntimeException {
+
+        private final VerificationAnalysisFailureCode failureCode;
+
+        public ProviderException(VerificationAnalysisFailureCode failureCode, String message) {
+            super(message);
+            this.failureCode = Objects.requireNonNull(failureCode, "failureCode must not be null");
+        }
+
+        public ProviderException(VerificationAnalysisFailureCode failureCode, String message, Throwable cause) {
+            super(message, cause);
+            this.failureCode = Objects.requireNonNull(failureCode, "failureCode must not be null");
+        }
+
+        public VerificationAnalysisFailureCode failureCode() {
+            return failureCode;
         }
     }
 
