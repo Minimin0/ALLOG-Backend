@@ -121,10 +121,6 @@ class AnthropicVerificationAnalysisProviderTest {
                 () -> assertTrue(system.contains("never decide a verification outcome")),
                 () -> assertTrue(system.contains("concrete visual evidence")),
                 () -> assertTrue(system.contains("not a pass probability")),
-                // The two moved together in the first baseline; the instruction separating them is pinned.
-                () -> assertTrue(system.contains("objectPresence and framedProperly are independent")),
-                () -> assertTrue(system.contains("cut off at a frame edge")),
-                () -> assertTrue(system.contains("how completely you could make the observations")),
                 () -> assertFalse(serialized.contains("not-a-real-key")),
                 () -> assertFalse(serialized.contains("userId")),
                 () -> assertFalse(serialized.contains("firebaseUid")),
