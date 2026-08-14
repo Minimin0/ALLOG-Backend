@@ -12,10 +12,16 @@
 # DecisionPolicy outputs; how a label maps to one of them is the open product decision this
 # dataset exists to inform.
 #
-# STATUS: the PHOTO assets in assetRef are NOT yet in the repository. No image was added, because
-# the repository owns no test image assets and copyright-unclear internet images must not be
-# committed. Acquiring team-owned or properly licensed assets is a separate follow-up task; the
-# harness is exercised with in-memory observations until then.
+# STATUS: the 7 active PHOTO assets are present alongside this file. All are team-shot or
+# team-composed. Location metadata is stripped from the committed JPEGs; the raw originals are
+# kept outside the repository.
+#
+# DEFERRED: low-light / motion-blur insufficient-evidence fixture.
+# Reason: no appropriate human-labelled fixture is available. The candidate photo was dim but
+# sharp, and its meal was plainly assessable, so labelling it INSUFFICIENT_EVIDENCE would have
+# been false ground truth. Not required for the hackathon MVP.
+# Future: restore during AI quality hardening, once a genuinely unassessable meal photo exists.
+# The scenario is deferred, not retired.
 #
 # Columns: caseId, templateKey, criteriaReference, assetRef, humanLabel
 caseId	templateKey	criteriaReference	assetRef	humanLabel
@@ -24,8 +30,7 @@ clear-plated-meal-01	MEAL_PHOTO_RECORD	meal-photo-record@1	clear-plated-meal-01.
 clear-meal-in-progress-01	MEAL_PHOTO_RECORD	meal-photo-record@1	clear-meal-in-progress-01.jpg	CLEAR_VALID_EVIDENCE
 # B. Food visible only in part, or genuinely arguable.
 partial-meal-frame-edge-01	MEAL_PHOTO_RECORD	meal-photo-record@1	partial-meal-frame-edge-01.jpg	PARTIAL_OR_AMBIGUOUS_EVIDENCE
-# C. Too dark or blurred to assess.
-low-light-blurred-01	MEAL_PHOTO_RECORD	meal-photo-record@1	low-light-blurred-01.jpg	INSUFFICIENT_EVIDENCE
+# C. Too dark or blurred to assess: deferred, see DEFERRED above.
 # D. Subject unrelated to a meal.
 unrelated-scene-01	MEAL_PHOTO_RECORD	meal-photo-record@1	unrelated-scene-01.jpg	INSUFFICIENT_EVIDENCE
 # E. Visual integrity concern: photograph of a screen. Records an image observation, not misconduct.

@@ -23,7 +23,7 @@ class EvaluationCaseManifestTest {
         EvaluationCaseManifest manifest = EvaluationCaseManifest.loadFromClasspath(PILOT_MANIFEST, CATALOG);
 
         assertAll(
-                () -> assertEquals(8, manifest.size()),
+                () -> assertEquals(7, manifest.size()),
                 () -> assertTrue(manifest.cases().stream().allMatch(
                         evaluationCase -> evaluationCase.templateKey()
                                 .equals(VerificationTemplateCatalog.MEAL_PHOTO_RECORD)
@@ -45,7 +45,8 @@ class EvaluationCaseManifestTest {
         assertAll(
                 () -> assertEquals(3, manifest.countOf(EvaluationHumanLabel.CLEAR_VALID_EVIDENCE)),
                 () -> assertEquals(1, manifest.countOf(EvaluationHumanLabel.PARTIAL_OR_AMBIGUOUS_EVIDENCE)),
-                () -> assertEquals(3, manifest.countOf(EvaluationHumanLabel.INSUFFICIENT_EVIDENCE)),
+                // Two, not three: the low-light insufficient-evidence fixture is deferred.
+                () -> assertEquals(2, manifest.countOf(EvaluationHumanLabel.INSUFFICIENT_EVIDENCE)),
                 () -> assertEquals(1, manifest.countOf(EvaluationHumanLabel.POTENTIAL_INTEGRITY_ANOMALY)),
                 // Image text is data, never an instruction: the label follows the visible evidence,
                 // not what the overlaid text asserts about the verification.
