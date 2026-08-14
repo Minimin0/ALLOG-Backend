@@ -8,6 +8,9 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -35,6 +38,11 @@ class EvaluationAssetIntegrityTest {
 
     private static final String DATASET_DIRECTORY = "/verification/evaluation/meal-photo-record-v1";
     private static final String PILOT_MANIFEST = DATASET_DIRECTORY + "/cases.tsv";
+    private static final int APP1 = 0xE1;
+    private static final int START_OF_SCAN = 0xDA;
+    private static final int GPS_IFD_POINTER = 0x8825;
+    private static final String EXIF_IDENTIFIER = "Exif\0\0";
+    private static final String XMP_NAMESPACE = "http://ns.adobe.com/xap/1.0/";
     private static final VerificationTemplateCatalog CATALOG = new VerificationTemplateCatalog();
 
     private static final EvaluationCaseManifest MANIFEST =
@@ -60,6 +68,21 @@ class EvaluationAssetIntegrityTest {
                     }
             );
         });
+    }
+
+    /**
+     * A fixture is shipped to an external provider as stored bytes, so location metadata committed
+     * here would leave the repository on the next evaluation run. One fixture did carry GPS
+     * coordinates, which is why this is a test and not a one-off cleanup.
+     */
+    @Test
+    void noCaseCarriesLocationMetadata() {
+        Path datasetDirectory = datasetDirectory();
+
+        MANIFEST.cases().forEach(evaluationCase -> assertFalse(
+                carriesLocationMetadata(bytes(datasetDirectory.resolve(evaluationCase.assetRef()))),
+                () -> evaluationCase.caseId() + " carries EXIF GPS or XMP location metadata"
+        ));
     }
 
     @Test
@@ -102,6 +125,57 @@ class EvaluationAssetIntegrityTest {
     private BufferedImage decode(Path path) {
         try {
             return ImageIO.read(path.toFile());
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
+    /** Walks JPEG marker segments only; the compressed scan is never searched for text. */
+    private boolean carriesLocationMetadata(byte[] jpeg) {
+        ByteBuffer buffer = ByteBuffer.wrap(jpeg).order(ByteOrder.BIG_ENDIAN);
+        int index = 2;
+        while (index + 4 <= jpeg.length && (jpeg[index] & 0xFF) == 0xFF) {
+            int marker = jpeg[index + 1] & 0xFF;
+            int length = buffer.getShort(index + 2) & 0xFFFF;
+            if (marker == APP1 && isLocationBearing(jpeg, index + 4, length - 2)) {
+                return true;
+            }
+            if (marker == START_OF_SCAN) {
+                return false;
+            }
+            index += 2 + length;
+        }
+        return false;
+    }
+
+    private boolean isLocationBearing(byte[] jpeg, int offset, int length) {
+        String header = new String(jpeg, offset, Math.min(length, XMP_NAMESPACE.length()), StandardCharsets.ISO_8859_1);
+        if (header.startsWith(XMP_NAMESPACE)) {
+            return new String(jpeg, offset, length, StandardCharsets.UTF_8).contains("GPS");
+        }
+        if (!header.startsWith(EXIF_IDENTIFIER)) {
+            return false;
+        }
+        return hasGpsDirectory(jpeg, offset + EXIF_IDENTIFIER.length(), length - EXIF_IDENTIFIER.length());
+    }
+
+    private boolean hasGpsDirectory(byte[] jpeg, int offset, int length) {
+        ByteBuffer tiff = ByteBuffer.wrap(jpeg, offset, length).slice();
+        // "MM" and "II" are the byte order marks themselves, and 0x4D4D reads the same either way.
+        tiff.order(tiff.getShort(0) == 0x4D4D ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN);
+        int rootDirectory = tiff.getInt(4);
+        int entries = tiff.getShort(rootDirectory) & 0xFFFF;
+        for (int entry = 0; entry < entries; entry++) {
+            if ((tiff.getShort(rootDirectory + 2 + entry * 12) & 0xFFFF) == GPS_IFD_POINTER) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private byte[] bytes(Path path) {
+        try {
+            return Files.readAllBytes(path);
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
         }

@@ -19,9 +19,11 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -39,9 +41,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * <p>Run with:
  * {@code ANTHROPIC_API_KEY="$(security find-generic-password -a "$USER" -s ALLOG_ANTHROPIC_API_KEY -w)"
- * ALLOG_ANTHROPIC_BASELINE_RUN=1 ./gradlew test --tests '*AnthropicMealPhotoBaselineTest'}
+ * ALLOG_ANTHROPIC_BASELINE_CASES=clear-plated-meal-01,unrelated-scene-01
+ * ./gradlew test --tests '*AnthropicMealPhotoBaselineTest'}
  */
-@EnabledIfEnvironmentVariable(named = "ALLOG_ANTHROPIC_BASELINE_RUN", matches = "1")
+@EnabledIfEnvironmentVariable(named = "ALLOG_ANTHROPIC_BASELINE_CASES", matches = ".+")
 class AnthropicMealPhotoBaselineTest {
 
     private static final String DATASET_DIRECTORY = "/verification/evaluation/meal-photo-record-v1";
@@ -54,11 +57,14 @@ class AnthropicMealPhotoBaselineTest {
             DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
 
     /**
-     * Excluded from the paid run: this fixture still carries an EXIF GPS position, and the adapter
-     * sends stored bytes unchanged, so calling it would hand a real location to the provider. The
-     * dataset is ground truth and is not edited from here.
+     * The caseIds to call, and the run gate itself. Naming the cases is what enables the run, so an
+     * unset or unpropagated variable skips the test instead of paying for every case in the dataset.
      */
-    private static final Set<String> LOCATION_METADATA_EXCLUSIONS = Set.of("rephotographed-screen-01");
+    private static final Set<String> SELECTED_CASE_IDS =
+            Arrays.stream(System.getenv().getOrDefault("ALLOG_ANTHROPIC_BASELINE_CASES", "").split(","))
+                    .map(String::trim)
+                    .filter(caseId -> !caseId.isEmpty())
+                    .collect(Collectors.toUnmodifiableSet());
 
     private static final String HEADER = String.join(
             "\t",
@@ -68,11 +74,17 @@ class AnthropicMealPhotoBaselineTest {
     );
 
     @Test
-    void recordsOneObservationPerCanonicalCaseInManifestOrder() throws IOException {
+    void recordsOneObservationPerSelectedCaseInManifestOrder() throws IOException {
         VerificationTemplateCatalog catalog = new VerificationTemplateCatalog();
         EvaluationCaseManifest manifest =
                 EvaluationCaseManifest.loadFromClasspath(DATASET_DIRECTORY + "/cases.tsv", catalog);
         assertEquals(7, manifest.size(), "canonical MVP dataset must declare exactly 7 cases");
+
+        List<EvaluationCase> selected = manifest.cases().stream()
+                .filter(evaluationCase -> SELECTED_CASE_IDS.contains(evaluationCase.caseId()))
+                .toList();
+        // A typo would otherwise be discovered only after the calls it was meant to target.
+        assertEquals(SELECTED_CASE_IDS.size(), selected.size(), "every selected caseId must exist in the manifest");
 
         VerificationCriteria.ProviderContract criteria = catalog
                 .requireCriteria(VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1)
@@ -87,10 +99,7 @@ class AnthropicMealPhotoBaselineTest {
 
         String executionId = EXECUTION_ID.format(Instant.now());
         List<String> rows = new ArrayList<>(List.of(HEADER));
-        for (EvaluationCase evaluationCase : manifest.cases()) {
-            if (LOCATION_METADATA_EXCLUSIONS.contains(evaluationCase.caseId())) {
-                continue;
-            }
+        for (EvaluationCase evaluationCase : selected) {
             rows.add(observe(provider, criteria, evaluationCase, executionId));
         }
 

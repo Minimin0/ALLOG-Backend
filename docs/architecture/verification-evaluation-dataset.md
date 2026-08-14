@@ -74,18 +74,20 @@ criteria version이 동일하게 거부된다.
 
 ## Dataset v1 cases
 
-8건. 시나리오 A~F를 모두 덮는다.
+Active 7건. 시나리오 A, B, D, E, F를 덮는다. 시나리오 C(low-light/blur)는 DEFERRED다.
 
 | caseId | Label |
 |---|---|
 | `clear-plated-meal-01` | `CLEAR_VALID_EVIDENCE` |
 | `clear-meal-in-progress-01` | `CLEAR_VALID_EVIDENCE` |
 | `partial-meal-frame-edge-01` | `PARTIAL_OR_AMBIGUOUS_EVIDENCE` |
-| `low-light-blurred-01` | `INSUFFICIENT_EVIDENCE` |
 | `unrelated-scene-01` | `INSUFFICIENT_EVIDENCE` |
 | `rephotographed-screen-01` | `POTENTIAL_INTEGRITY_ANOMALY` |
 | `injection-text-with-meal-01` | `CLEAR_VALID_EVIDENCE` |
 | `injection-text-without-meal-01` | `INSUFFICIENT_EVIDENCE` |
+
+`low-light-blurred-01`은 적절한 human-labelled fixture가 없어 보류했다. 사유와 복구 조건은
+`cases.tsv` 주석에 있다.
 
 ### Prompt injection
 
@@ -97,15 +99,20 @@ criteria version이 동일하게 거부된다.
 
 ## PHOTO asset 상태
 
-**아직 repository에 없다.** Repository는 test image asset을 하나도 소유하고 있지 않고, 저작권이 불명확한
-인터넷 이미지를 commit할 수 없다. 가짜 binary image generator도 만들지 않았다 — 이 pilot 하나 때문에
-fixture generation toolchain을 도입할 이유가 없다.
+Active 7건의 JPEG가 dataset directory에 commit되어 있다. 전부 팀이 직접 촬영하거나 구성한 asset이다.
 
-Manifest의 `assetRef`는 확보 대상 파일명을 선언한다. `assetRef`는 dataset directory 안의 flat filename만
-허용한다(`/`, `\`, `..` 거부). 향후 loader가 편집된 manifest에 의해 directory 밖으로 유도될 수 없다.
+`assetRef`는 dataset directory 안의 flat filename만 허용한다(`/`, `\`, `..` 거부). loader가 편집된
+manifest에 의해 directory 밖으로 유도될 수 없다.
 
-팀 소유 또는 정당한 license의 PHOTO asset 확보는 **별도 후속 task**다. 그때까지 harness는 in-memory
-observation으로 검증한다.
+### Location metadata 금지
+
+Canonical fixture는 GPS/location metadata를 포함하지 않는다. 평가에 필요한 것은 visual evidence이지
+실제 촬영 위치가 아니고, fixture bytes는 evaluation run마다 외부 provider로 그대로 전송된다.
+
+`rephotographed-screen-01.jpg`에서 실제로 EXIF GPS가 발견되어 APP1/Exif segment를 byte 단위로 제거했다.
+entropy-coded scan은 한 byte도 바꾸지 않았으므로 pixel과 화면 재촬영 흔적은 그대로다. 재발 방지는
+`EvaluationAssetIntegrityTest`의 location metadata regression check가 담당한다(JDK byte inspection만
+사용, EXIF library 없음).
 
 ## Threshold sweep
 
@@ -154,8 +161,9 @@ confusion matrix를 Product 의미 전체로 사용하지 않는다.
 
 ## Known limitations
 
-- 실제 PHOTO asset이 없어 real observation은 아직 수집되지 않았다. Evaluation 결과는 N/A다.
-- Dataset 8건은 통계적 결론을 내기에 작다. 방향성 관찰용이다.
+- Real observation은 `baselines/`에 수집되어 있다. 6건은 최초 baseline run, `rephotographed-screen-01`
+  1건은 GPS 제거 후 별도 completion run이다. 두 run은 서로 다른 실행 시각의 별개 artifact다.
+- Dataset 7건은 통계적 결론을 내기에 작다. 방향성 관찰용이다.
 - Label 당 case 수가 불균형하다(`PARTIAL` 1건, `POTENTIAL_INTEGRITY_ANOMALY` 1건). `countOf(label)`로
   gap이 드러나게 해두었다.
 - Label은 현재 단일 labeler 기준이다. Inter-rater agreement 절차는 없다.
