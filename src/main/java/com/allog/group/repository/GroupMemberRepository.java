@@ -40,6 +40,10 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
             Collection<GroupMemberStatus> statuses
     );
 
+    boolean existsByRoutineGroup_IdAndUser_Id(Long routineGroupId, Long userId);
+
+    long countByRoutineGroup_IdAndStatus(Long routineGroupId, GroupMemberStatus status);
+
     List<GroupMember> findAllByRoutineGroup_Id(Long routineGroupId);
 
     @EntityGraph(attributePaths = "routineGroup")

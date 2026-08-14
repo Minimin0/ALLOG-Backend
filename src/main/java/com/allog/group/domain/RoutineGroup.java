@@ -171,6 +171,14 @@ public class RoutineGroup extends BaseTimeEntity {
         return status == RoutineGroupStatus.RECRUITING;
     }
 
+    /** Capacity reached. The group stays activatable: {@link #canActivate()} accepts FULL. */
+    public void markFull() {
+        if (status != RoutineGroupStatus.RECRUITING) {
+            throw new IllegalStateException("only a RECRUITING routine group can become FULL");
+        }
+        status = RoutineGroupStatus.FULL;
+    }
+
     private static String requireText(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
