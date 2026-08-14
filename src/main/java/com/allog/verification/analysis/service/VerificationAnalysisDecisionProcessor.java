@@ -45,15 +45,19 @@ public final class VerificationAnalysisDecisionProcessor implements Verification
     }
 
     /**
-     * An observation the provider could not make is not evidence in the member's favour, so an
-     * absent measurement falls to the same side as a negative one and can never produce a PASS.
+     * "Could not be assessed" is a different fact from "was assessed and was not there", so a
+     * missing measurement is never read as a negative one. Deciding automatically requires both
+     * measurements to actually exist; anything short of that is for a person to look at.
      */
     static AnalysisRecommendation recommend(VerificationAnalysisObservation observation) {
-        if (Boolean.TRUE.equals(observation.anomalyDetected())) {
+        Boolean anomalyDetected = observation.anomalyDetected();
+        Boolean objectPresence = observation.objectPresence();
+        if (anomalyDetected == null || objectPresence == null) {
             return AnalysisRecommendation.REVIEW_REQUIRED;
         }
-        return Boolean.TRUE.equals(observation.objectPresence())
-                ? AnalysisRecommendation.PASS
-                : AnalysisRecommendation.REJECT_CANDIDATE;
+        if (anomalyDetected) {
+            return AnalysisRecommendation.REVIEW_REQUIRED;
+        }
+        return objectPresence ? AnalysisRecommendation.PASS : AnalysisRecommendation.REJECT_CANDIDATE;
     }
 }

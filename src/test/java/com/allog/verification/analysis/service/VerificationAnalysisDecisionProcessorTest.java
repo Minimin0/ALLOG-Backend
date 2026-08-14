@@ -31,38 +31,32 @@ class VerificationAnalysisDecisionProcessorTest {
     @Mock
     private VerificationAnalysisMediaProcessor mediaProcessor;
 
+    /**
+     * Every combination of the two deciding measurements, including the ones the provider could not
+     * assess. A missing measurement never decides anything on its own: the row that matters most is
+     * {@code null, true}, where reading a missing anomaly as "no anomaly" would auto-approve
+     * evidence nobody checked for tampering.
+     */
     @ParameterizedTest(name = "anomaly={0}, presence={1} -> {2}")
-    @CsvSource({
+    @CsvSource(nullValues = "null", value = {
             "true,  true,  REVIEW_REQUIRED",
             "true,  false, REVIEW_REQUIRED",
+            "true,  null,  REVIEW_REQUIRED",
+            "false, true,  PASS",
             "false, false, REJECT_CANDIDATE",
-            "false, true,  PASS"
+            "false, null,  REVIEW_REQUIRED",
+            "null,  true,  REVIEW_REQUIRED",
+            "null,  false, REVIEW_REQUIRED",
+            "null,  null,  REVIEW_REQUIRED"
     })
     void decidesFromAnomalyAndPresenceAlone(
-            boolean anomalyDetected,
-            boolean objectPresence,
+            Boolean anomalyDetected,
+            Boolean objectPresence,
             AnalysisRecommendation expected
     ) {
         assertEquals(expected, VerificationAnalysisDecisionProcessor.recommend(
-                observation(objectPresence, new BigDecimal("0.9"), anomalyDetected, true)
+                observation(objectPresence, new BigDecimal("0.9"), anomalyDetected)
         ));
-    }
-
-    /** An unassessable measurement must not become a PASS. */
-    @Test
-    void treatsUnassessableMeasurementsAsNotPassing() {
-        VerificationAnalysisObservation unassessable = new VerificationAnalysisObservation(
-                null,
-                null,
-                null,
-                null,
-                VerificationAnalysisObservation.ReasonCode.OBSERVATION_INSUFFICIENT
-        );
-
-        assertEquals(
-                AnalysisRecommendation.REJECT_CANDIDATE,
-                VerificationAnalysisDecisionProcessor.recommend(unassessable)
-        );
     }
 
     /**
@@ -100,7 +94,7 @@ class VerificationAnalysisDecisionProcessorTest {
     void bridgesObservationToSuccessResultWithoutAlteringProviderEvidence() {
         VerificationAnalysisProvider.Result providerResult = new VerificationAnalysisProvider.Result(
                 "synthetic-model",
-                observation(true, new BigDecimal("0.98"), false, true)
+                observation(true, new BigDecimal("0.98"), false)
         );
         when(mediaProcessor.process(CLAIM))
                 .thenReturn(new VerificationAnalysisMediaProcessor.Observed(CRITERIA, providerResult));
@@ -137,20 +131,18 @@ class VerificationAnalysisDecisionProcessorTest {
     }
 
     private VerificationAnalysisObservation observation(
-            boolean objectPresence,
+            Boolean objectPresence,
             BigDecimal relevanceScore,
-            boolean anomalyDetected,
-            boolean framedProperly
+            Boolean anomalyDetected
     ) {
         return new VerificationAnalysisObservation(
                 objectPresence,
                 relevanceScore,
                 anomalyDetected,
-                framedProperly,
-                anomalyDetected
+                true,
+                Boolean.TRUE.equals(anomalyDetected)
                         ? VerificationAnalysisObservation.ReasonCode.POTENTIAL_INTEGRITY_ANOMALY
                         : VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
         );
     }
-
 }
