@@ -1,0 +1,51 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.3.4'
+	id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.allog'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	runtimeOnly 'com.mysql:mysql-connector-j'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'com.h2database:h2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+// STAGE7 임계치 캘리브레이션 전용 일회성 도구 실행. ANTHROPIC_API_KEY 환경변수 필요, 실제 API 호출함.
+tasks.register('runCalibration', JavaExec) {
+	group = 'verification'
+	description = 'Run calibration-images/ through the real STAGE6 Vision pipeline (needs ANTHROPIC_API_KEY).'
+	mainClass = 'com.allog.allogbe.tools.calibration.CalibrationRunner'
+	classpath = sourceSets.main.runtimeClasspath
+	systemProperty 'file.encoding', 'UTF-8'
+}
+
+// VIDEO 제출 전체 파이프라인(STAGE4 ffmpeg 추출 포함) 검증용 일회성 도구. ANTHROPIC_API_KEY +
+// PATH상의 ffmpeg/ffprobe 필요.
+tasks.register('runVideoCalibration', JavaExec) {
+	group = 'verification'
+	description = 'Run test video/ through the real STAGE4->STAGE7 VIDEO pipeline (needs ANTHROPIC_API_KEY, ffmpeg).'
+	mainClass = 'com.allog.allogbe.tools.calibration.VideoCalibrationRunner'
+	classpath = sourceSets.main.runtimeClasspath
+	systemProperty 'file.encoding', 'UTF-8'
+}

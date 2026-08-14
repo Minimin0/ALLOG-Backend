@@ -1,0 +1,6 @@
+category	filename	label	subtype	objectPresence	detectedObjects	relevanceScore	anomalyFlags	confidence	summary	available
+sleep	pass_01.png	pass		true	스마트폰 알람 화면;시각 표시(4:24);날짜 표시(11월 24일 수요일);알람 해제/다시 알림 UI 버튼	0.75		0.6	이미지에는 스마트폰의 알람 화면이 캡처되어 있으며 4:24라는 시각과 11월 24일 수요일이라는 날짜, '알람' 문구 및 '5분 후 다시 알림' 버튼이 관찰됩니다. 수면 시간 자체를 명시적으로 보여주는 트래커 화면이나 침대는 확인되지 않으며, 알람 해제 시각으로 보이는 정보만 나타나 있습니다.	true
+sleep	pass_02.png	pass		true	스마트폰 화면;알람 앱 화면;시간 표시(1:25);Snooze 버튼;Stop 버튼;알람 라벨 텍스트(iOS 26 alarm clock (huuuuge))	0.6	실제 기기 재촬영이 아닌 일러스트/렌더링 이미지로 보임;화면 UI가 실제 iOS 알람 화면과 디자인 요소(라벨명, 폰트, 레이아웃)에서 차이가 관찰됨;생성형 이미지 또는 목업 이미지 의심	0.55	이미지에는 '1:25' 시간과 Snooze/Stop 버튼이 표시된 알람 화면이 관찰되며 수면 관련 앱 화면으로 보이나, 실제 기기를 촬영한 사진이라기보다 일러스트 또는 목업 형태의 이미지로 보이는 특징이 있어 추가 확인이 필요해 보입니다.	true
+sleep	reject_unrelated_01.jpg	reject	unrelated	false	네잎클로버(식물 잎);흰색 배경면	0.02	기대 객체(수면 시간 표시 화면 또는 침대)와 무관한 이미지;루틴 카테고리(SLEEP)와 시각적 연관성 없음	0.9	이미지에는 흰색 배경 위에 놓인 네잎클로버(식물 잎)만 관찰되며, 수면 시간이 표시된 알람/트래커 화면이나 침대 등 기대 객체는 확인되지 않는다.	true
+sleep	review_01.png	review		true	스마트폰 잠금화면;시간 표시(4:24);날짜 표시(11월 24일 수요일);'알람' 텍스트;알람 해제 아이콘(X 버튼)	0.55		0.6	스마트폰 잠금화면에 시간(4:24)과 날짜, '알람' 문구가 표시되어 있으나, 수면 시간(취침~기상 시간 범위)을 직접적으로 나타내는 수면 트래커 화면이나 침대 등의 요소는 관찰되지 않는다.	true
+duplicates	pair1_original.jpg vs pair1_resubmit.png	pair	hamming=6							
