@@ -15,10 +15,13 @@ import java.awt.image.BufferedImage;
 public class ImageQualityAnalyzer {
 
 	/**
-	 * TODO(팀 조정 필요): 실제 제출 샘플로 검증되지 않은 잠정 기본값이다.
-	 * Laplacian variance 는 이미지 크기/노이즈에 따라 편차가 커서, 운영 데이터로 재보정이 필요하다.
+	 * 캘리브레이션 45장(라벨된 실제 카메라 사진, docs/calibration/ 참고) 기준 재조정.
+	 * 기존 100은 사람이 정상(pass)으로 라벨한 사진의 20%(20장 중 4장, 최저 27.58)를 오탐으로
+	 * 하드 리젝시켰다. 20은 그 20장 전체(최저 27.58)를 통과시키면서, 실제로 흔들리거나
+	 * 초점이 안 맞은 reject 샘플 4장(blurScore 1.4~2.84)은 전부 정확히 차단한다 —
+	 * 두 그룹 사이에 10배 가까운 여유가 있어 이 값으로 명확히 갈린다.
 	 */
-	static final float BLUR_THRESHOLD = 100f;
+	static final float BLUR_THRESHOLD = 20f;
 	static final int MIN_RESOLUTION_WIDTH = 480;
 	static final int MIN_RESOLUTION_HEIGHT = 480;
 

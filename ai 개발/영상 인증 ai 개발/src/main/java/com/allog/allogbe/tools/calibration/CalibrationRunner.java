@@ -34,10 +34,10 @@ import java.util.Map;
  */
 public final class CalibrationRunner {
 
-	private record CategoryConfig(ChallengeCategory category, String description, List<String> expectedObjects) {
+	record CategoryConfig(ChallengeCategory category, String description, List<String> expectedObjects) {
 	}
 
-	private static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new LinkedHashMap<>();
+	static final Map<String, CategoryConfig> CATEGORY_CONFIGS = new LinkedHashMap<>();
 
 	static {
 		CATEGORY_CONFIGS.put("skincare", new CategoryConfig(ChallengeCategory.SKINCARE,
@@ -47,7 +47,7 @@ public final class CalibrationRunner {
 		CATEGORY_CONFIGS.put("exercise", new CategoryConfig(ChallengeCategory.EXERCISE,
 				"운동 루틴 수행 인증", List.of("운동 기구 또는 운동복", "운동하는 모습")));
 		CATEGORY_CONFIGS.put("sleep", new CategoryConfig(ChallengeCategory.SLEEP,
-				"수면 시간 기록 루틴 인증", List.of("수면 시간이 표시된 화면(알람/수면 트래커 앱) 또는 침대")));
+				"아침 기상 루틴 인증", List.of("거울에 비친 사람(전신 또는 상반신 셀카)")));
 	}
 
 	private CalibrationRunner() {

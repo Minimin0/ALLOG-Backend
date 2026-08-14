@@ -212,7 +212,7 @@ class RoutineVerificationEndToEndTest {
 	}
 
 	@Test
-	void 케이스5_이상징후가_있으면_REVIEW_REQUIRED_NORMAL로_귀결된다() throws IOException {
+	void 케이스5_이상징후가_있으면_REJECT_CANDIDATE_HIGH로_귀결된다() throws IOException {
 		visionClient.respondWith(new VisionAnalysisResult(
 				true, List.of("운동화"), 0.9, List.of("화면 재촬영 의심"), 0.7, "이상 징후가 발견되었습니다."));
 
@@ -221,8 +221,8 @@ class RoutineVerificationEndToEndTest {
 		Long id = submitResponse.getBody().verificationId();
 
 		RoutineVerificationDetailResponse detail = getDetail(id);
-		assertThat(detail.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(detail.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(detail.aiClassification()).isEqualTo(AiClassification.REJECT_CANDIDATE);
+		assertThat(detail.reviewPriority()).isEqualTo(ReviewPriority.HIGH);
 		assertThat(detail.countedInScore()).isFalse();
 	}
 
@@ -273,7 +273,7 @@ class RoutineVerificationEndToEndTest {
 	}
 
 	@Test
-	void 케이스8_구도가_잘못되었다고_판단되면_REVIEW_REQUIRED_NORMAL로_귀결된다() throws IOException {
+	void 케이스8_구도가_잘못되었다고_판단되어도_PASS로_귀결되고_구도_정보는_기록만_남는다() throws IOException {
 		visionClient.respondWith(new VisionAnalysisResult(
 				true, List.of("운동화"), 0.9, List.of(), 0.8, "운동화가 화면 절반만 보입니다.",
 				false, "인물이 화면 밖으로 크게 잘려나가 있습니다."));
@@ -283,8 +283,7 @@ class RoutineVerificationEndToEndTest {
 		Long id = submitResponse.getBody().verificationId();
 
 		RoutineVerificationDetailResponse detail = getDetail(id);
-		assertThat(detail.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(detail.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(detail.aiClassification()).isEqualTo(AiClassification.PASS);
 		assertThat(detail.qualityCheck().isFramedProperly()).isFalse();
 		assertThat(detail.qualityCheck().framingIssue()).contains("잘려나가");
 	}

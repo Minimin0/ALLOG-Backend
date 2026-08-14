@@ -39,3 +39,13 @@ tasks.register('runCalibration', JavaExec) {
 	classpath = sourceSets.main.runtimeClasspath
 	systemProperty 'file.encoding', 'UTF-8'
 }
+
+// VIDEO 제출 전체 파이프라인(STAGE4 ffmpeg 추출 포함) 검증용 일회성 도구. ANTHROPIC_API_KEY +
+// PATH상의 ffmpeg/ffprobe 필요.
+tasks.register('runVideoCalibration', JavaExec) {
+	group = 'verification'
+	description = 'Run test video/ through the real STAGE4->STAGE7 VIDEO pipeline (needs ANTHROPIC_API_KEY, ffmpeg).'
+	mainClass = 'com.allog.allogbe.tools.calibration.VideoCalibrationRunner'
+	classpath = sourceSets.main.runtimeClasspath
+	systemProperty 'file.encoding', 'UTF-8'
+}

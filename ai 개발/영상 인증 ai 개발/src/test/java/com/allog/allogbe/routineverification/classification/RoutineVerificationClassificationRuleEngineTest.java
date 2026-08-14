@@ -54,23 +54,16 @@ class RoutineVerificationClassificationRuleEngineTest {
 	}
 
 	@Test
-	void 이상징후가_있으면_관련성이_높아도_REVIEW_REQUIRED_NORMAL이다() {
+	void 이상징후가_있으면_관련성이_높아도_REJECT_CANDIDATE_HIGH이다() {
 		ClassificationDecision decision = ruleEngine.classify(false, vision(true, 0.95, List.of("워터마크 불일치")));
 
-		assertThat(decision.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(decision.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(decision.aiClassification()).isEqualTo(AiClassification.REJECT_CANDIDATE);
+		assertThat(decision.reviewPriority()).isEqualTo(ReviewPriority.HIGH);
 	}
 
 	@Test
-	void 관련성_점수가_임계치_미만이면_REVIEW_REQUIRED_NORMAL이다() {
-		ClassificationDecision decision = ruleEngine.classify(false, vision(true, 0.49, List.of()));
-
-		assertThat(decision.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-	}
-
-	@Test
-	void 관련성_점수가_임계치와_같으면_경계는_포함되지_않아_PASS이다() {
-		ClassificationDecision decision = ruleEngine.classify(false, vision(true, 0.5, List.of()));
+	void 관련성_점수가_낮아도_이상징후가_없으면_PASS이다() {
+		ClassificationDecision decision = ruleEngine.classify(false, vision(true, 0.02, List.of()));
 
 		assertThat(decision.aiClassification()).isEqualTo(AiClassification.PASS);
 	}
@@ -86,11 +79,10 @@ class RoutineVerificationClassificationRuleEngineTest {
 	}
 
 	@Test
-	void 구도가_잘못되었다고_판단되면_다른_지표가_전부_좋아도_REVIEW_REQUIRED_NORMAL이다() {
+	void 구도가_잘못되었다고_판단되어도_다른_지표가_좋으면_PASS이다() {
 		ClassificationDecision decision = ruleEngine.classify(false,
 				visionWithFraming(false, "인물이 화면 절반 밖으로 잘려나감"));
 
-		assertThat(decision.aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(decision.reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(decision.aiClassification()).isEqualTo(AiClassification.PASS);
 	}
 }

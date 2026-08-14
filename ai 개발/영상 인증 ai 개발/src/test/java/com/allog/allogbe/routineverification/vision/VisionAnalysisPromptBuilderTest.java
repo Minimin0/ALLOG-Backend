@@ -16,7 +16,7 @@ class VisionAnalysisPromptBuilderTest {
 			case SKINCARE -> List.of("스킨케어 제품", "거울에 비친 얼굴");
 			case MEAL -> List.of("식사가 담긴 접시", "식탁");
 			case EXERCISE -> List.of("운동 기구", "운동복 착용 모습");
-			case SLEEP -> List.of("침대", "수면 시간이 표시된 화면");
+			case SLEEP -> List.of("거울에 비친 사람");
 		};
 
 		VisionAnalysisRequest request = new VisionAnalysisRequest(

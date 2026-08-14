@@ -86,6 +86,53 @@ class RoutineVerificationFrameCaptureServiceTest {
 	}
 
 	@Test
+	void 후보_프레임_전부_추출은_3개_지점_모두_성공하면_시간순으로_3장_반환한다() {
+		Path videoPath = Path.of("video.mp4");
+		Duration duration = Duration.ofSeconds(100);
+		Path mid = Path.of("/tmp/frame-mid.jpg");
+		Path front = Path.of("/tmp/frame-front.jpg");
+		Path back = Path.of("/tmp/frame-back.jpg");
+
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(50))).thenReturn(mid);
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(25))).thenReturn(front);
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(75))).thenReturn(back);
+
+		java.util.List<Path> result = service.captureAllCandidateFrames(videoPath, duration);
+
+		assertThat(result).containsExactly(mid, front, back);
+	}
+
+	@Test
+	void 후보_프레임_전부_추출은_일부_지점만_실패해도_성공한_프레임만_반환한다() {
+		Path videoPath = Path.of("video.mp4");
+		Duration duration = Duration.ofSeconds(100);
+		Path front = Path.of("/tmp/frame-front.jpg");
+
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(50)))
+				.thenThrow(new FrameExtractionAttemptException("mid failed"));
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(25))).thenReturn(front);
+		when(extractor.extractFrame(videoPath, Duration.ofSeconds(75)))
+				.thenThrow(new FrameExtractionAttemptException("back failed"));
+
+		java.util.List<Path> result = service.captureAllCandidateFrames(videoPath, duration);
+
+		assertThat(result).containsExactly(front);
+	}
+
+	@Test
+	void 후보_프레임_전부_추출은_3곳_모두_실패하면_FrameCaptureException을_던진다() {
+		Path videoPath = Path.of("corrupt.mp4");
+		Duration duration = Duration.ofSeconds(60);
+
+		when(extractor.extractFrame(eq(videoPath), any()))
+				.thenThrow(new FrameExtractionAttemptException("decode failed"));
+
+		assertThatThrownBy(() -> service.captureAllCandidateFrames(videoPath, duration))
+				.isInstanceOf(FrameCaptureException.class)
+				.hasCauseInstanceOf(FrameExtractionAttemptException.class);
+	}
+
+	@Test
 	void 매우_짧은_영상도_음수_타임스탬프_없이_처리된다() {
 		Path videoPath = Path.of("short.mp4");
 		Duration duration = Duration.ofSeconds(2);

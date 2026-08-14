@@ -136,7 +136,7 @@ class RoutineVerificationClassificationPipelineTest {
 	}
 
 	@Test
-	void 케이스5a_이상징후가_있으면_REVIEW_REQUIRED_NORMAL이다() {
+	void 케이스5a_이상징후가_있으면_REJECT_CANDIDATE_HIGH다() {
 		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
 		when(hashCalculator.calculate(any())).thenReturn(new PerceptualHash(1L));
 		when(duplicateDetector.detect(any(), any(), any(), any())).thenReturn(DuplicateCheckResult.notDuplicate());
@@ -145,12 +145,12 @@ class RoutineVerificationClassificationPipelineTest {
 
 		RoutineVerificationClassificationOutput output = pipeline.process(input);
 
-		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(output.decision().reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.REJECT_CANDIDATE);
+		assertThat(output.decision().reviewPriority()).isEqualTo(ReviewPriority.HIGH);
 	}
 
 	@Test
-	void 케이스5b_관련성이_애매하면_REVIEW_REQUIRED_NORMAL이다() {
+	void 케이스5b_관련성이_애매해도_이상징후가_없으면_PASS다() {
 		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
 		when(hashCalculator.calculate(any())).thenReturn(new PerceptualHash(1L));
 		when(duplicateDetector.detect(any(), any(), any(), any())).thenReturn(DuplicateCheckResult.notDuplicate());
@@ -159,8 +159,7 @@ class RoutineVerificationClassificationPipelineTest {
 
 		RoutineVerificationClassificationOutput output = pipeline.process(input);
 
-		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(output.decision().reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.PASS);
 	}
 
 	@Test
@@ -201,7 +200,7 @@ class RoutineVerificationClassificationPipelineTest {
 	}
 
 	@Test
-	void 케이스9_품질은_정상인데_관련성이_낮은_복합_케이스는_규칙0을_건너뛰고_기존_규칙대로_REVIEW_REQUIRED다() {
+	void 케이스9_품질은_정상인데_관련성이_낮은_복합_케이스는_규칙0을_건너뛰고_이상징후_없으면_PASS다() {
 		when(gate.validate(submitRequest)).thenReturn(new MetadataCheck(true, false, null));
 		// qualityAnalyzer 는 @BeforeEach 기본 스텁(선명함/고해상도)을 그대로 사용 -> 규칙 0은 통과(건너뜀)
 		when(hashCalculator.calculate(any())).thenReturn(new PerceptualHash(1L));
@@ -211,8 +210,7 @@ class RoutineVerificationClassificationPipelineTest {
 
 		RoutineVerificationClassificationOutput output = pipeline.process(input);
 
-		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.REVIEW_REQUIRED);
-		assertThat(output.decision().reviewPriority()).isEqualTo(ReviewPriority.NORMAL);
+		assertThat(output.decision().aiClassification()).isEqualTo(AiClassification.PASS);
 		assertThat(output.qualityCheck().isBlurry()).isFalse();
 		assertThat(output.qualityCheck().isPassesMinResolution()).isTrue();
 		verify(hashCalculator, times(1)).calculate(any());

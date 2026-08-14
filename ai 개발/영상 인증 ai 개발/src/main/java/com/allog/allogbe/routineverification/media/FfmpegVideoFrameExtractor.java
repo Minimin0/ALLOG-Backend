@@ -29,12 +29,17 @@ public class FfmpegVideoFrameExtractor implements VideoFrameExtractor {
 				"-ss", formatTimestamp(timestamp),
 				"-i", videoPath.toString(),
 				"-frames:v", "1",
+				"-update", "1",
 				"-q:v", "2",
 				outputPath.toString());
 
 		try {
+			// stdout/stderr를 반드시 버려야 한다 — ffmpeg의 콘솔 출력(코덱 배너 등)이 OS 파이프
+			// 버퍼를 채우면 아무도 읽지 않는 한 ffmpeg가 write()에서 블록되고, 그 상태로
+			// waitFor()가 타임아웃날 때까지 절대 끝나지 않는다(실측: 모든 시도가 타임아웃).
 			Process process = new ProcessBuilder(command)
-					.redirectErrorStream(true)
+					.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+					.redirectError(ProcessBuilder.Redirect.DISCARD)
 					.start();
 
 			boolean finished = process.waitFor(PROCESS_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
