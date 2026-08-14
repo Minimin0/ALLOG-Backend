@@ -36,3 +36,8 @@ logs/
 *.key
 *.p12
 *.jks
+
+# Local R&D calibration sources. Curated fixtures live in
+# src/test/resources/verification/evaluation/ instead.
+ai 개발/calibration-images/
+ai 개발/test video/
