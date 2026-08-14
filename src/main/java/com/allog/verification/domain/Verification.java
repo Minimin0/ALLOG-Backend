@@ -104,7 +104,14 @@ public class Verification extends BaseTimeEntity {
     }
 
     public void approve(Clock clock) {
-        requireTransition(VerificationStatus.APPROVED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
+        // SUBMITTED도 허용한다: AI 처리 중 상태의 authority는 VerificationAnalysis.status이고,
+        // Verification은 analysis가 끝날 때까지 SUBMITTED에 머문다(startProcessing() production caller 없음).
+        requireTransition(
+                VerificationStatus.APPROVED,
+                VerificationStatus.SUBMITTED,
+                VerificationStatus.PROCESSING,
+                VerificationStatus.REVIEW_REQUIRED
+        );
         Instant eventTime = requireClock(clock).instant();
         if (submittedAt == null) {
             throw new IllegalStateException("approval requires submittedAt");

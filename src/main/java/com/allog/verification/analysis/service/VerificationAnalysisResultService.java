@@ -1,5 +1,6 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
@@ -47,6 +48,9 @@ public class VerificationAnalysisResultService {
                 observation.framedProperly(),
                 completedAt
         );
+        if (result.recommendation() == AnalysisRecommendation.PASS) {
+            analysis.getVerification().approve(clock);
+        }
         return true;
     }
 

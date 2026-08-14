@@ -66,6 +66,20 @@ class VerificationTest {
     }
 
     @Test
+    void submittedApprovesWithoutPassingThroughProcessing() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        verification.approve(SECOND);
+
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, verification.getStatus()),
+                () -> assertEquals(SECOND.instant(), verification.getApprovedAt()),
+                () -> assertTrue(verification.getStatus().countsAsProgress())
+        );
+    }
+
+    @Test
     void eventTimestampDoesNotDependOnClockZone() {
         Instant eventTime = Instant.parse("2026-08-11T15:30:00.123456Z");
         Verification utc = verification();

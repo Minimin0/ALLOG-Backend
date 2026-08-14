@@ -80,7 +80,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest(properties = "allog.verification.analysis.processing-timeout=PT5M")
+@SpringBootTest(properties = {
+        // 이 클래스는 fixture(verification/user/group)를 commit한 채 남기므로 전용 DB를 쓴다.
+        // 공유 allog-test DB에 두면 전역 row count를 단언하는 다른 테스트가 실행 순서에 따라 깨진다.
+        "spring.datasource.url=${ANALYSIS_TEST_DB_URL:jdbc:h2:mem:verification-analysis;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1}",
+        "spring.datasource.username=${ANALYSIS_TEST_DB_USERNAME:sa}",
+        "spring.datasource.password=${ANALYSIS_TEST_DB_PASSWORD:}",
+        "spring.datasource.driver-class-name=${ANALYSIS_TEST_DB_DRIVER:org.h2.Driver}",
+        "allog.verification.analysis.processing-timeout=PT5M"
+})
 @ActiveProfiles("test")
 class VerificationAnalysisPersistenceTest {
 
@@ -535,11 +543,87 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(VerificationAnalysisStatus.FAILED, analysis.getStatus()),
                 () -> assertEquals(VerificationAnalysisFailureCode.TIMEOUT, analysis.getFailureCode()),
                 () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals("SUBMITTED", verificationStatus(claim.analysisId())),
                 () -> assertEquals(WORKER_NOW.plusSeconds(30), analysis.getCompletedAt()),
                 () -> assertEquals(1, analysis.getAttemptCount()),
                 () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt()),
                 () -> assertEquals(1, clock.reads()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void passRecommendationApprovesVerificationInTheSameTransaction() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.PASS)));
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(claim.analysisId()))
+        );
+    }
+
+    @Test
+    void nonPassRecommendationsPersistWithoutChangingVerificationStatus() {
+        VerificationAnalysisClaim rejectClaim = claimPendingAnalysis();
+        VerificationAnalysisClaim reviewClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertTrue(resultService.completeSuccess(
+                rejectClaim,
+                successResult(AnalysisRecommendation.REJECT_CANDIDATE)
+        ));
+        assertTrue(resultService.completeSuccess(
+                reviewClaim,
+                successResult(AnalysisRecommendation.REVIEW_REQUIRED)
+        ));
+
+        assertAll(
+                () -> assertEquals(
+                        AnalysisRecommendation.REJECT_CANDIDATE,
+                        repository.findById(rejectClaim.analysisId()).orElseThrow().getRecommendation()
+                ),
+                () -> assertEquals(
+                        AnalysisRecommendation.REVIEW_REQUIRED,
+                        repository.findById(reviewClaim.analysisId()).orElseThrow().getRecommendation()
+                ),
+                () -> assertEquals("SUBMITTED", verificationStatus(rejectClaim.analysisId())),
+                () -> assertEquals("SUBMITTED", verificationStatus(reviewClaim.analysisId()))
+        );
+    }
+
+    @Test
+    void stalePassResultNeverApprovesVerification() {
+        VerificationAnalysisClaim oldClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        claimService.claimNextPending().orElseThrow();
+        clock.set(WORKER_NOW.plusSeconds(330));
+
+        assertFalse(resultService.completeSuccess(oldClaim, successResult(AnalysisRecommendation.PASS)));
+
+        assertEquals("SUBMITTED", verificationStatus(oldClaim.analysisId()));
+    }
+
+    @Test
+    void passApprovalRollsBackTogetherWithAnalysisSuccess() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertThrows(TestRollback.class, () -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.PASS)));
+            throw new TestRollback();
+        }));
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, analysis.getStatus()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals("SUBMITTED", verificationStatus(claim.analysisId()))
         );
     }
 
@@ -749,7 +833,7 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void workerPersistsSyntheticSuccessWithFiveStatementsAndTransactionSeparation() {
+    void workerPersistsSyntheticPassSuccessWithApprovalAndTransactionSeparation() {
         Long analysisId = pendingAnalysisId();
         AtomicBoolean processorTransaction = new AtomicBoolean(true);
         VerificationAnalysisWorker worker = worker(claim -> {
@@ -774,13 +858,16 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, executionResult),
-                () -> assertEquals(5, statements),
+                // 5 -> 7: PASS 승인이 같은 transaction에서 verification을 select + update 한다.
+                () -> assertEquals(7, statements),
                 () -> assertFalse(processorTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                () -> assertEquals(2, clock.reads()),
-                () -> assertEquals(2, clock.transactionalReads()),
+                // 2 -> 3: approve(clock)가 approvedAt을 위해 clock을 한 번 더 읽는다.
+                () -> assertEquals(3, clock.reads()),
+                () -> assertEquals(3, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
                 () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(analysisId)),
                 () -> assertEquals(WORKER_NOW, analysis.getCompletedAt()),
                 () -> assertEquals(1, analysis.getAttemptCount()),
                 () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt())
@@ -1081,14 +1168,16 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, result),
-                () -> assertEquals(7, statements),
+                // 7 -> 9, 2 -> 3: PASS 승인이 같은 transaction에서 verification을 select + update 하고 clock을 한 번 더 읽는다.
+                () -> assertEquals(9, statements),
                 () -> assertFalse(storage.transactionActive()),
                 () -> assertFalse(providerTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                () -> assertEquals(2, clock.reads()),
-                () -> assertEquals(2, clock.transactionalReads()),
+                () -> assertEquals(3, clock.reads()),
+                () -> assertEquals(3, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
-                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation())
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(analysisId))
         );
     }
 
@@ -1286,6 +1375,19 @@ class VerificationAnalysisPersistenceTest {
                         true,
                         VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
                 )
+        );
+    }
+
+    private String verificationStatus(Long analysisId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        select verification.status
+                        from verification
+                        join verification_analysis analysis on analysis.verification_id = verification.id
+                        where analysis.id = ?
+                        """,
+                String.class,
+                analysisId
         );
     }
 
