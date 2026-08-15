@@ -56,7 +56,7 @@ public class VerificationReviewController {
             @AuthenticationPrincipal AllogPrincipal principal
     ) {
         requireOperator(principal);
-        return ReviewResponse.from(reviewService.approve(verificationId));
+        return ReviewResponse.from(reviewService.approve(verificationId, principal.userId()));
     }
 
     @PostMapping("/{verificationId}/reject")
@@ -66,7 +66,9 @@ public class VerificationReviewController {
             @Valid @RequestBody RejectRequest request
     ) {
         requireOperator(principal);
-        return ReviewResponse.from(reviewService.reject(verificationId, request.reason()));
+        return ReviewResponse.from(
+                reviewService.reject(verificationId, principal.userId(), request.reason())
+        );
     }
 
     private void requireOperator(AllogPrincipal principal) {

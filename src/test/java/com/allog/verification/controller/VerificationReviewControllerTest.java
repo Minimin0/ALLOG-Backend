@@ -60,7 +60,7 @@ class VerificationReviewControllerTest {
     @Test
     void operatorApprovesAHeldVerification() throws Exception {
         Verification approved = settled(VerificationStatus.APPROVED, null);
-        when(reviewService.approve(42L)).thenReturn(approved);
+        when(reviewService.approve(42L, OPERATOR_ID)).thenReturn(approved);
 
         mockMvc.perform(as(OPERATOR_ID, APPROVE))
                 .andExpect(status().isOk())
@@ -71,7 +71,7 @@ class VerificationReviewControllerTest {
     @Test
     void operatorRejectsWithAReasonThatIsKept() throws Exception {
         Verification rejected = settled(VerificationStatus.REJECTED, "food is not visible");
-        when(reviewService.reject(42L, "food is not visible")).thenReturn(rejected);
+        when(reviewService.reject(42L, OPERATOR_ID, "food is not visible")).thenReturn(rejected);
 
         mockMvc.perform(as(OPERATOR_ID, REJECT)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +80,7 @@ class VerificationReviewControllerTest {
                 .andExpect(jsonPath("$.status").value("REJECTED"))
                 .andExpect(jsonPath("$.reviewNote").value("food is not visible"));
 
-        verify(reviewService).reject(eq(42L), eq("food is not visible"));
+        verify(reviewService).reject(eq(42L), eq(OPERATOR_ID), eq("food is not visible"));
     }
 
     @Test
@@ -127,7 +127,7 @@ class VerificationReviewControllerTest {
 
     @Test
     void aVerificationThatIsNotHeldCannotBeSettled() throws Exception {
-        when(reviewService.approve(anyLong()))
+        when(reviewService.approve(anyLong(), anyLong()))
                 .thenThrow(new VerificationCommandConflictException("already settled"));
 
         mockMvc.perform(as(OPERATOR_ID, APPROVE)).andExpect(status().isConflict());
@@ -135,7 +135,7 @@ class VerificationReviewControllerTest {
 
     @Test
     void anUnknownVerificationIsNotFound() throws Exception {
-        when(reviewService.approve(anyLong())).thenThrow(new VerificationNotFoundException(42L));
+        when(reviewService.approve(anyLong(), anyLong())).thenThrow(new VerificationNotFoundException(42L));
 
         mockMvc.perform(as(OPERATOR_ID, APPROVE)).andExpect(status().isNotFound());
     }

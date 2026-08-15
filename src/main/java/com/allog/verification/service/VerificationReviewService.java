@@ -63,16 +63,16 @@ public class VerificationReviewService {
     }
 
     @Transactional
-    public Verification approve(Long verificationId) {
+    public Verification approve(Long verificationId, Long operatorId) {
         Verification verification = heldForReview(verificationId);
-        verification.approve(clock);
+        verification.approveByOperator(clock, operatorId);
         return verification;
     }
 
     @Transactional
-    public Verification reject(Long verificationId, String reviewNote) {
+    public Verification reject(Long verificationId, Long operatorId, String reviewNote) {
         Verification verification = heldForReview(verificationId);
-        verification.reject(reviewNote);
+        verification.rejectByOperator(clock, operatorId, reviewNote);
         return verification;
     }
 

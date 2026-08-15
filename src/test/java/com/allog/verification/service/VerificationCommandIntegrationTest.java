@@ -98,6 +98,7 @@ class VerificationCommandIntegrationTest {
     private static final byte[] GPS_TAGS = "GPSLatitude=37.5665".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
     /** Photo submissions are sanitized in place, so the fixture has to be a real image. */
     private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
+    private static final Long OPERATOR_ID = 99L;
 
     @Autowired
     private VerificationCommandService service;
@@ -214,14 +215,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV10() {
+    void flywayHasExactlyV1ThroughV11() {
         assertAll(
-                () -> assertEquals(10, jdbcTemplate.queryForObject(
+                () -> assertEquals(11, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '10'",
+                        "select count(*) from flyway_schema_history where version = '11'",
                         Integer.class
                 ))
         );
@@ -494,7 +495,7 @@ class VerificationCommandIntegrationTest {
         UUID firstRequestId = verificationAnalysisRepository
                 .findByVerification_Id(first.verificationId()).orElseThrow().getAnalysisRequestId();
 
-        rejectCurrentAnalysis(first.verificationId());
+        completeCurrentAnalysis(first.verificationId(), AnalysisRecommendation.REJECT_CANDIDATE);
         assertEquals(VerificationStatus.RETRY_REQUIRED, currentVerification(fixture).getStatus());
 
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
@@ -532,7 +533,7 @@ class VerificationCommandIntegrationTest {
         Fixture fixture = fixture(true);
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
-        rejectCurrentAnalysis(submitted.verificationId());
+        completeCurrentAnalysis(submitted.verificationId(), AnalysisRecommendation.REJECT_CANDIDATE);
 
         assertThrows(
                 VerificationCommandConflictException.class,
@@ -545,16 +546,17 @@ class VerificationCommandIntegrationTest {
         Fixture fixture = fixture(true);
         Long verificationId = heldForReview(fixture);
 
-        Verification approved = reviewService.approve(verificationId);
+        Verification approved = reviewService.approve(verificationId, OPERATOR_ID);
 
+        Verification stored = verificationRepository.findById(verificationId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationStatus.APPROVED, approved.getStatus()),
                 () -> assertTrue(approved.getStatus().countsAsProgress()),
                 () -> assertNotNull(approved.getApprovedAt()),
-                () -> assertEquals(
-                        VerificationStatus.APPROVED,
-                        verificationRepository.findById(verificationId).orElseThrow().getStatus()
-                )
+                () -> assertEquals(VerificationStatus.APPROVED, stored.getStatus()),
+                // the reward this unlocks has to be able to name the person behind it
+                () -> assertEquals(OPERATOR_ID, stored.getReviewedBy()),
+                () -> assertEquals(SNAPSHOT_NOW, stored.getReviewedAt())
         );
     }
 
@@ -563,13 +565,36 @@ class VerificationCommandIntegrationTest {
         Fixture fixture = fixture(true);
         Long verificationId = heldForReview(fixture);
 
-        reviewService.reject(verificationId, "food is not visible in the photo");
+        reviewService.reject(verificationId, OPERATOR_ID, "food is not visible in the photo");
 
         Verification rejected = verificationRepository.findById(verificationId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationStatus.REJECTED, rejected.getStatus()),
                 () -> assertEquals("food is not visible in the photo", rejected.getReviewNote()),
-                () -> assertFalse(rejected.getStatus().countsAsProgress())
+                () -> assertFalse(rejected.getStatus().countsAsProgress()),
+                () -> assertEquals(OPERATOR_ID, rejected.getReviewedBy()),
+                () -> assertEquals(SNAPSHOT_NOW, rejected.getReviewedAt())
+        );
+    }
+
+    /** An AI approval is nobody's manual decision, so the audit columns must stay empty. */
+    @Test
+    void anAiApprovalLeavesTheOperatorAuditEmpty() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.PASS);
+
+        Verification approved = verificationRepository.findById(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, approved.getStatus()),
+                () -> assertNotNull(approved.getApprovedAt()),
+                () -> assertNull(approved.getReviewedBy()),
+                () -> assertNull(approved.getReviewedAt()),
+                () -> assertNull(approved.getReviewNote())
         );
     }
 
@@ -577,16 +602,16 @@ class VerificationCommandIntegrationTest {
     void anAlreadySettledVerificationCannotBeSettledAgain() {
         Fixture fixture = fixture(true);
         Long verificationId = heldForReview(fixture);
-        reviewService.approve(verificationId);
+        reviewService.approve(verificationId, OPERATOR_ID);
 
         assertAll(
                 () -> assertThrows(
                         VerificationCommandConflictException.class,
-                        () -> reviewService.approve(verificationId)
+                        () -> reviewService.approve(verificationId, OPERATOR_ID)
                 ),
                 () -> assertThrows(
                         VerificationCommandConflictException.class,
-                        () -> reviewService.reject(verificationId, "changed my mind")
+                        () -> reviewService.reject(verificationId, OPERATOR_ID, "changed my mind")
                 ),
                 () -> assertEquals(
                         VerificationStatus.APPROVED,
@@ -601,7 +626,7 @@ class VerificationCommandIntegrationTest {
         Long newer = heldForReview(fixture(true));
         // settled and in-flight verifications must not appear in the queue
         Long approved = heldForReview(fixture(true));
-        reviewService.approve(approved);
+        reviewService.approve(approved, OPERATOR_ID);
         Fixture submittedOnly = fixture(true);
         mediaUploadService.issueCurrentUpload(
                 submittedOnly.groupId(), submittedOnly.userId(), "image/jpeg", PHOTO.length
@@ -643,11 +668,11 @@ class VerificationCommandIntegrationTest {
         Long verificationId = mediaSubmissionService
                 .submitCurrent(fixture.groupId(), fixture.userId())
                 .verificationId();
-        rejectCurrentAnalysis(verificationId);
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.REJECT_CANDIDATE);
 
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
-        rejectCurrentAnalysis(verificationId);
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.REJECT_CANDIDATE);
 
         assertEquals(
                 VerificationStatus.REVIEW_REQUIRED,
@@ -660,7 +685,7 @@ class VerificationCommandIntegrationTest {
      * Rejects one specific analysis. This class shares its database across tests, so claiming "the next
      * pending" would happily pick up a leftover from another test.
      */
-    private void rejectCurrentAnalysis(Long verificationId) {
+    private void completeCurrentAnalysis(Long verificationId, AnalysisRecommendation recommendation) {
         inTransaction(() -> {
             verificationAnalysisRepository.findByVerification_Id(verificationId)
                     .orElseThrow()
@@ -674,14 +699,15 @@ class VerificationCommandIntegrationTest {
                 analysis.getAnalysisRequestId(),
                 analysis.getAttemptCount()
         );
+        boolean present = recommendation == AnalysisRecommendation.PASS;
         assertTrue(analysisResultService.completeSuccess(claim, new VerificationAnalysisSuccessResult(
-                AnalysisRecommendation.REJECT_CANDIDATE,
+                recommendation,
                 VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1,
                 new VerificationAnalysisProvider.Result(
                         "synthetic-model",
                         new VerificationAnalysisObservation(
-                                false,
-                                new BigDecimal("0.1000"),
+                                present,
+                                new BigDecimal("0.7500"),
                                 false,
                                 true,
                                 VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE

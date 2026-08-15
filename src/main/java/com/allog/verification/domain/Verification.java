@@ -82,6 +82,16 @@ public class Verification extends BaseTimeEntity {
     @Column(name = "review_note", length = 500)
     private String reviewNote;
 
+    /**
+     * Which operator settled this by hand, and when. Null means nobody did - the AI decided it.
+     * Rewards are paid off approvals, so an approval has to be able to name the person behind it.
+     */
+    @Column(name = "reviewed_by")
+    private Long reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
     protected Verification() {
     }
 
@@ -160,9 +170,22 @@ public class Verification extends BaseTimeEntity {
         );
     }
 
-    public void reject(String reviewNote) {
+    /** Approval by a person rather than by the AI, so the reward it unlocks has a name attached. */
+    public void approveByOperator(Clock clock, Long operatorId) {
+        approve(clock);
+        recordReview(clock, operatorId);
+    }
+
+    /** Rejection is operator-only: the AI never rejects, it asks for a retry or hands over a hold. */
+    public void rejectByOperator(Clock clock, Long operatorId, String reviewNote) {
         transitionTo(VerificationStatus.REJECTED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
         this.reviewNote = reviewNote;
+        recordReview(clock, operatorId);
+    }
+
+    private void recordReview(Clock clock, Long operatorId) {
+        this.reviewedBy = Objects.requireNonNull(operatorId, "operatorId must not be null");
+        this.reviewedAt = requireClock(clock).instant();
     }
 
     public void invalidate(Clock clock) {
@@ -216,6 +239,14 @@ public class Verification extends BaseTimeEntity {
 
     public String getReviewNote() {
         return reviewNote;
+    }
+
+    public Long getReviewedBy() {
+        return reviewedBy;
+    }
+
+    public Instant getReviewedAt() {
+        return reviewedAt;
     }
 
     private void transitionTo(VerificationStatus target, VerificationStatus... allowedSources) {

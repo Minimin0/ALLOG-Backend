@@ -120,7 +120,7 @@ class VerificationPersistenceTest {
         );
         rejected.submit(CLOCK);
         rejected.startProcessing();
-        rejected.reject("operator note");
+        rejected.rejectByOperator(CLOCK, 99L, "operator note");
         repository.saveAllAndFlush(List.of(second, rejected, first));
 
         List<Verification> approved = repository
