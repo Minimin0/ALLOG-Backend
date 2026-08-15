@@ -1,8 +1,10 @@
 package com.allog.verification.analysis.service;
 
+import com.allog.verification.analysis.controller.VerificationAnalysisOperationsProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,6 +17,7 @@ import org.springframework.context.annotation.Configuration;
  * {@link VerificationAnalysisWorker#processNext()} yet, so activation still needs a driver.
  */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(VerificationAnalysisOperationsProperties.class)
 public class VerificationAnalysisProcessorConfiguration {
 
     @Bean
