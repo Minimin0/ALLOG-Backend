@@ -313,14 +313,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV11() {
+    void flywayAppliedExactlyV1ThroughV12() {
         assertAll(
-                () -> assertEquals(11, jdbcTemplate.queryForObject(
+                () -> assertEquals(12, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '11' and success = true",
+                        "select count(*) from flyway_schema_history where version = '12' and success = true",
                         Integer.class
                 ))
         );
@@ -899,12 +899,13 @@ class VerificationAnalysisPersistenceTest {
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, executionResult),
                 // 5 -> 7: PASS 승인이 같은 transaction에서 verification을 select + update 한다.
-                () -> assertEquals(7, statements),
+                // 7 -> 9: 보상 지급이 중복 확인 select + reward insert를 더한다.
+                () -> assertEquals(9, statements),
                 () -> assertFalse(processorTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                // 2 -> 3: approve(clock)가 approvedAt을 위해 clock을 한 번 더 읽는다.
-                () -> assertEquals(3, clock.reads()),
-                () -> assertEquals(3, clock.transactionalReads()),
+                // approve(clock)의 approvedAt, 그리고 보상의 grantedAt 때문에 clock을 두 번 더 읽는다.
+                () -> assertEquals(4, clock.reads()),
+                () -> assertEquals(4, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
                 () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
                 () -> assertEquals("APPROVED", verificationStatus(analysisId)),
@@ -1208,13 +1209,14 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, result),
-                // 7 -> 9, 2 -> 3: PASS 승인이 같은 transaction에서 verification을 select + update 하고 clock을 한 번 더 읽는다.
-                () -> assertEquals(9, statements),
+                // PASS 승인이 verification을 select + update 하고, 보상 지급이 select + insert를 더한다.
+                () -> assertEquals(11, statements),
                 () -> assertFalse(storage.transactionActive()),
                 () -> assertFalse(providerTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                () -> assertEquals(3, clock.reads()),
-                () -> assertEquals(3, clock.transactionalReads()),
+                // approvedAt과 grantedAt 때문에 clock을 두 번 더 읽는다.
+                () -> assertEquals(4, clock.reads()),
+                () -> assertEquals(4, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
                 () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
                 () -> assertEquals("APPROVED", verificationStatus(analysisId))

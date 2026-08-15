@@ -4,6 +4,7 @@ import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
+import com.allog.reward.service.VerificationRewardService;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.domain.Verification;
 import org.springframework.stereotype.Service;
@@ -17,10 +18,16 @@ import java.util.Objects;
 public class VerificationAnalysisResultService {
 
     private final VerificationAnalysisRepository repository;
+    private final VerificationRewardService rewardService;
     private final Clock clock;
 
-    public VerificationAnalysisResultService(VerificationAnalysisRepository repository, Clock clock) {
+    public VerificationAnalysisResultService(
+            VerificationAnalysisRepository repository,
+            VerificationRewardService rewardService,
+            Clock clock
+    ) {
         this.repository = Objects.requireNonNull(repository);
+        this.rewardService = Objects.requireNonNull(rewardService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -52,6 +59,7 @@ public class VerificationAnalysisResultService {
         Verification verification = analysis.getVerification();
         if (result.recommendation() == AnalysisRecommendation.PASS) {
             verification.approve(clock);
+            rewardService.grantFor(verification);
         } else if (result.recommendation() == AnalysisRecommendation.REJECT_CANDIDATE) {
             // One guided retry, then it stops being the member's problem and becomes a hold.
             if (verification.hasRetryRemaining()) {

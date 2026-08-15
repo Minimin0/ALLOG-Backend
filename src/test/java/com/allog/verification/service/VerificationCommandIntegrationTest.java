@@ -10,6 +10,9 @@ import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.reward.domain.VerificationReward;
+import com.allog.reward.repository.VerificationRewardRepository;
+import com.allog.reward.service.VerificationRewardService;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
@@ -145,6 +148,12 @@ class VerificationCommandIntegrationTest {
     @Autowired
     private VerificationReviewService reviewService;
 
+    @Autowired
+    private VerificationRewardRepository rewardRepository;
+
+    @Autowired
+    private VerificationRewardService rewardService;
+
     @BeforeEach
     void resetMediaBoundary() {
         clock.set(SNAPSHOT_NOW);
@@ -215,14 +224,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV11() {
+    void flywayHasExactlyV1ThroughV12() {
         assertAll(
-                () -> assertEquals(11, jdbcTemplate.queryForObject(
+                () -> assertEquals(12, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '11'",
+                        "select count(*) from flyway_schema_history where version = '12'",
                         Integer.class
                 ))
         );
@@ -659,6 +668,83 @@ class VerificationCommandIntegrationTest {
                 () -> assertNotNull(held.mediaUrl()),
                 () -> assertNotNull(held.userId()),
                 () -> assertNotNull(held.groupId())
+        );
+    }
+
+    @Test
+    void anAiApprovalPaysTheVerificationOnce() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.PASS);
+
+        VerificationReward reward = rewardRepository.findByVerification_Id(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(10, reward.getPoints()),
+                () -> assertEquals(SNAPSHOT_NOW, reward.getGrantedAt()),
+                () -> assertEquals(1, rewardRows(verificationId))
+        );
+    }
+
+    @Test
+    void anOperatorApprovalPaysTheVerification() {
+        Long verificationId = heldForReview(fixture(true));
+
+        reviewService.approve(verificationId, OPERATOR_ID);
+
+        assertAll(
+                () -> assertTrue(rewardRepository.existsByVerification_Id(verificationId)),
+                () -> assertEquals(1, rewardRows(verificationId))
+        );
+    }
+
+    @Test
+    void aRejectedVerificationIsNeverPaid() {
+        Fixture aiRejected = fixture(true);
+        mediaUploadService.issueCurrentUpload(aiRejected.groupId(), aiRejected.userId(), "image/jpeg", PHOTO.length);
+        Long retryable = mediaSubmissionService
+                .submitCurrent(aiRejected.groupId(), aiRejected.userId())
+                .verificationId();
+        completeCurrentAnalysis(retryable, AnalysisRecommendation.REJECT_CANDIDATE);
+
+        Long operatorRejected = heldForReview(fixture(true));
+        reviewService.reject(operatorRejected, OPERATOR_ID, "food is not visible");
+
+        assertAll(
+                () -> assertFalse(rewardRepository.existsByVerification_Id(retryable)),
+                () -> assertFalse(rewardRepository.existsByVerification_Id(operatorRejected))
+        );
+    }
+
+    /** A replayed approval - retried worker call, operator double click - must not pay twice. */
+    @Test
+    void replayingAnApprovalDoesNotPayTwice() {
+        Long verificationId = heldForReview(fixture(true));
+        reviewService.approve(verificationId, OPERATOR_ID);
+        Long rewardId = rewardRepository.findByVerification_Id(verificationId).orElseThrow().getId();
+
+        inTransaction(() -> {
+            rewardService.grantFor(verificationRepository.findById(verificationId).orElseThrow());
+            return null;
+        });
+
+        assertAll(
+                () -> assertEquals(1, rewardRows(verificationId)),
+                () -> assertEquals(
+                        rewardId,
+                        rewardRepository.findByVerification_Id(verificationId).orElseThrow().getId()
+                )
+        );
+    }
+
+    private int rewardRows(Long verificationId) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from verification_reward where verification_id = ?",
+                Integer.class,
+                verificationId
         );
     }
 

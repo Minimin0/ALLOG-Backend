@@ -1,6 +1,7 @@
 package com.allog.verification.analysis.service;
 
 import com.allog.group.domain.RoutineGroup;
+import com.allog.reward.service.VerificationRewardService;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
@@ -50,13 +51,16 @@ class VerificationAnalysisResultServiceTest {
     @Mock
     private VerificationAnalysisRepository repository;
 
+    @Mock
+    private VerificationRewardService rewardService;
+
     private CountingClock clock;
     private VerificationAnalysisResultService service;
 
     @BeforeEach
     void setUp() {
         clock = new CountingClock(COMPLETED_AT);
-        service = new VerificationAnalysisResultService(repository, clock);
+        service = new VerificationAnalysisResultService(repository, rewardService, clock);
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.allog.verification.service;
 
+import com.allog.reward.service.VerificationRewardService;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationRepository;
@@ -30,17 +31,20 @@ public class VerificationReviewService {
     private final VerificationRepository verificationRepository;
     private final VerificationMediaStorage storage;
     private final VerificationMediaPolicy mediaPolicy;
+    private final VerificationRewardService rewardService;
     private final Clock clock;
 
     public VerificationReviewService(
             VerificationRepository verificationRepository,
             VerificationMediaStorage storage,
             VerificationMediaPolicy mediaPolicy,
+            VerificationRewardService rewardService,
             Clock clock
     ) {
         this.verificationRepository = Objects.requireNonNull(verificationRepository);
         this.storage = Objects.requireNonNull(storage);
         this.mediaPolicy = Objects.requireNonNull(mediaPolicy);
+        this.rewardService = Objects.requireNonNull(rewardService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -66,6 +70,7 @@ public class VerificationReviewService {
     public Verification approve(Long verificationId, Long operatorId) {
         Verification verification = heldForReview(verificationId);
         verification.approveByOperator(clock, operatorId);
+        rewardService.grantFor(verification);
         return verification;
     }
 
