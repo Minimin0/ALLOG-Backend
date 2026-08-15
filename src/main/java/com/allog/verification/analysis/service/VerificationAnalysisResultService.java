@@ -5,6 +5,7 @@ import com.allog.verification.analysis.domain.VerificationAnalysis;
 import com.allog.verification.analysis.domain.VerificationAnalysisFailureCode;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
+import com.allog.verification.domain.Verification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,8 +49,16 @@ public class VerificationAnalysisResultService {
                 observation.framedProperly(),
                 completedAt
         );
+        Verification verification = analysis.getVerification();
         if (result.recommendation() == AnalysisRecommendation.PASS) {
-            analysis.getVerification().approve(clock);
+            verification.approve(clock);
+        } else if (result.recommendation() == AnalysisRecommendation.REJECT_CANDIDATE) {
+            // One guided retry, then it stops being the member's problem and becomes a hold.
+            if (verification.hasRetryRemaining()) {
+                verification.requestRetry();
+            } else {
+                verification.requestReview();
+            }
         }
         return true;
     }

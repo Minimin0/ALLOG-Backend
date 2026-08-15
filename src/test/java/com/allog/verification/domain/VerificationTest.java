@@ -80,6 +80,34 @@ class VerificationTest {
     }
 
     @Test
+    void spendsExactlyOneGuidedRetry() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        assertTrue(verification.hasRetryRemaining());
+        verification.requestRetry();
+        verification.submit(SECOND);
+
+        assertAll(
+                () -> assertEquals(2, verification.getAttemptCount()),
+                () -> assertFalse(verification.hasRetryRemaining()),
+                // the retry is spent, so the verification can never be handed back to the member again
+                () -> assertThrows(IllegalStateException.class, verification::requestRetry)
+        );
+    }
+
+    /** A second rejection holds the verification without ever passing through PROCESSING. */
+    @Test
+    void submittedCanBeHeldForReview() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        verification.requestReview();
+
+        assertEquals(VerificationStatus.REVIEW_REQUIRED, verification.getStatus());
+    }
+
+    @Test
     void eventTimestampDoesNotDependOnClockZone() {
         Instant eventTime = Instant.parse("2026-08-11T15:30:00.123456Z");
         Verification utc = verification();

@@ -313,14 +313,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV8() {
+    void flywayAppliedExactlyV1ThroughV9() {
         assertAll(
-                () -> assertEquals(8, jdbcTemplate.queryForObject(
+                () -> assertEquals(9, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '8' and success = true",
+                        "select count(*) from flyway_schema_history where version = '9' and success = true",
                         Integer.class
                 ))
         );
@@ -571,7 +571,7 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void nonPassRecommendationsPersistWithoutChangingVerificationStatus() {
+    void firstRejectionSendsTheVerificationBackForOneRetry() {
         VerificationAnalysisClaim rejectClaim = claimPendingAnalysis();
         VerificationAnalysisClaim reviewClaim = claimPendingAnalysis();
         clock.set(WORKER_NOW.plusSeconds(30));
@@ -594,8 +594,45 @@ class VerificationAnalysisPersistenceTest {
                         AnalysisRecommendation.REVIEW_REQUIRED,
                         repository.findById(reviewClaim.analysisId()).orElseThrow().getRecommendation()
                 ),
-                () -> assertEquals("SUBMITTED", verificationStatus(rejectClaim.analysisId())),
+                () -> assertEquals("RETRY_REQUIRED", verificationStatus(rejectClaim.analysisId())),
+                // a REVIEW_REQUIRED recommendation is not a rejection, so it spends no retry
                 () -> assertEquals("SUBMITTED", verificationStatus(reviewClaim.analysisId()))
+        );
+    }
+
+    /** The second rejection is where the guided retry ends and a person has to look at it instead. */
+    @Test
+    void aRejectionAfterTheRetryIsHeldForReviewInsteadOfLooping() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+        assertEquals("RETRY_REQUIRED", verificationStatus(claim.analysisId()));
+
+        VerificationAnalysisClaim retryClaim = resubmitAndClaim(claim.analysisId());
+        assertTrue(resultService.completeSuccess(retryClaim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+
+        assertAll(
+                () -> assertEquals("REVIEW_REQUIRED", verificationStatus(claim.analysisId())),
+                () -> assertEquals(2, verificationAttemptCount(claim.analysisId()))
+        );
+    }
+
+    @Test
+    void aPassAfterTheRetryApprovesTheVerification() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+
+        VerificationAnalysisClaim retryClaim = resubmitAndClaim(claim.analysisId());
+        assertTrue(resultService.completeSuccess(retryClaim, successResult(AnalysisRecommendation.PASS)));
+
+        assertAll(
+                () -> assertEquals("APPROVED", verificationStatus(claim.analysisId())),
+                () -> assertEquals(2, verificationAttemptCount(claim.analysisId())),
+                () -> assertEquals(
+                        AnalysisRecommendation.PASS,
+                        repository.findById(claim.analysisId()).orElseThrow().getRecommendation()
+                )
         );
     }
 
@@ -1307,6 +1344,32 @@ class VerificationAnalysisPersistenceTest {
         return claimService.claimNextPending()
                 .filter(claim -> claim.analysisId().equals(analysisId))
                 .orElseThrow();
+    }
+
+    /** Replays what the member's guided retry does: submit again, then re-queue the same analysis. */
+    private VerificationAnalysisClaim resubmitAndClaim(Long analysisId) {
+        inTransaction(() -> {
+            VerificationAnalysis analysis = repository.findByIdWithVerification(analysisId).orElseThrow();
+            analysis.getVerification().submit(Clock.fixed(clock.instant(), ZoneOffset.UTC));
+            analysis.rearmForRetry(UUID.randomUUID());
+            return null;
+        });
+        return claimService.claimNextPending()
+                .filter(claim -> claim.analysisId().equals(analysisId))
+                .orElseThrow();
+    }
+
+    private int verificationAttemptCount(Long analysisId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        select verification.attempt_count
+                        from verification
+                        join verification_analysis analysis on analysis.verification_id = verification.id
+                        where analysis.id = ?
+                        """,
+                Integer.class,
+                analysisId
+        );
     }
 
     private VerificationAnalysisWorker worker(VerificationAnalysisProcessor processor) {

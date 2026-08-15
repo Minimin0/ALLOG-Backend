@@ -43,6 +43,9 @@ import java.util.Set;
 )
 public class Verification extends BaseTimeEntity {
 
+    /** MVP guided retry: the initial submission plus exactly one retry. */
+    private static final int MAX_ATTEMPTS = 2;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -71,6 +74,10 @@ public class Verification extends BaseTimeEntity {
     @Column(name = "invalidated_at")
     private Instant invalidatedAt;
 
+    /** User submissions spent on this opportunity: the first one plus at most one guided retry. */
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
     protected Verification() {
     }
 
@@ -91,12 +98,21 @@ public class Verification extends BaseTimeEntity {
 
     public void submit(Clock clock) {
         requireTransition(VerificationStatus.SUBMITTED, VerificationStatus.PENDING_UPLOAD, VerificationStatus.RETRY_REQUIRED);
+        if (attemptCount >= MAX_ATTEMPTS) {
+            throw new IllegalStateException("verification has no submission attempt left");
+        }
         Instant eventTime = requireClock(clock).instant();
         if (submittedAt != null && eventTime.isBefore(submittedAt)) {
             throw new IllegalStateException("submittedAt must not move backwards");
         }
         status = VerificationStatus.SUBMITTED;
         submittedAt = eventTime;
+        attemptCount++;
+    }
+
+    /** False once the guided retry has been spent, which is what turns a second rejection into a hold. */
+    public boolean hasRetryRemaining() {
+        return attemptCount < MAX_ATTEMPTS;
     }
 
     public void startProcessing() {
@@ -124,12 +140,17 @@ public class Verification extends BaseTimeEntity {
     }
 
     public void requestReview() {
-        transitionTo(VerificationStatus.REVIEW_REQUIRED, VerificationStatus.PROCESSING);
+        transitionTo(VerificationStatus.REVIEW_REQUIRED, VerificationStatus.SUBMITTED, VerificationStatus.PROCESSING);
     }
 
+    /** Guarded so a verification can never be sent back to the user without an attempt left to spend. */
     public void requestRetry() {
+        if (!hasRetryRemaining()) {
+            throw new IllegalStateException("verification has no retry left");
+        }
         transitionTo(
                 VerificationStatus.RETRY_REQUIRED,
+                VerificationStatus.SUBMITTED,
                 VerificationStatus.PROCESSING,
                 VerificationStatus.REVIEW_REQUIRED
         );
@@ -182,6 +203,10 @@ public class Verification extends BaseTimeEntity {
 
     public Instant getInvalidatedAt() {
         return invalidatedAt;
+    }
+
+    public int getAttemptCount() {
+        return attemptCount;
     }
 
     private void transitionTo(VerificationStatus target, VerificationStatus... allowedSources) {

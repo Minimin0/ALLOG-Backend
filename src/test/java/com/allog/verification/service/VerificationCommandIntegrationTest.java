@@ -10,9 +10,16 @@ import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.verification.analysis.domain.AnalysisRecommendation;
+import com.allog.verification.analysis.domain.VerificationAnalysis;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
+import com.allog.verification.analysis.service.VerificationAnalysisClaim;
+import com.allog.verification.analysis.service.VerificationAnalysisProvider;
+import com.allog.verification.analysis.service.VerificationAnalysisResultService;
+import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
@@ -37,6 +44,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -63,6 +71,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -127,6 +136,9 @@ class VerificationCommandIntegrationTest {
 
     @Autowired
     private VerificationTemplateCatalog verificationTemplateCatalog;
+
+    @Autowired
+    private VerificationAnalysisResultService analysisResultService;
 
     @BeforeEach
     void resetMediaBoundary() {
@@ -198,14 +210,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV8() {
+    void flywayHasExactlyV1ThroughV9() {
         assertAll(
-                () -> assertEquals(8, jdbcTemplate.queryForObject(
+                () -> assertEquals(9, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '8'",
+                        "select count(*) from flyway_schema_history where version = '9'",
                         Integer.class
                 ))
         );
@@ -465,6 +477,97 @@ class VerificationCommandIntegrationTest {
                 () -> assertEquals(0, analysisRows(verification.getId())),
                 () -> assertFalse(mediaStorage.inspectTransactionActive())
         );
+    }
+
+    @Test
+    void guidedRetryIssuesAFreshUploadAndRequeuesTheSameAnalysis() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+        String firstKey = mediaStorage.issuedKeys().getLast();
+        UUID firstRequestId = verificationAnalysisRepository
+                .findByVerification_Id(first.verificationId()).orElseThrow().getAnalysisRequestId();
+
+        rejectCurrentAnalysis(first.verificationId());
+        assertEquals(VerificationStatus.RETRY_REQUIRED, currentVerification(fixture).getStatus());
+
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult second = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+
+        Verification verification = currentVerification(fixture);
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(second.verificationId()).orElseThrow();
+        VerificationAnalysis analysis = verificationAnalysisRepository
+                .findByVerification_Id(second.verificationId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(first.verificationId(), second.verificationId()),
+                () -> assertEquals(VerificationStatus.SUBMITTED, verification.getStatus()),
+                () -> assertEquals(2, verification.getAttemptCount()),
+                () -> assertFalse(verification.hasRetryRemaining()),
+                // the retry uploads a different photo, so the binding moved to a new key
+                () -> assertNotEquals(firstKey, media.getObjectKey()),
+                () -> assertTrue(media.isConfirmed()),
+                // one analysis row, re-queued under a new request id, judged against the same criteria
+                () -> assertEquals(1, analysisRows(second.verificationId())),
+                () -> assertEquals(VerificationAnalysisStatus.PENDING, analysis.getStatus()),
+                () -> assertNotEquals(firstRequestId, analysis.getAnalysisRequestId()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        analysis.getCriteriaVersion()
+                )
+        );
+    }
+
+    @Test
+    void submitWithoutAFreshUploadIsRefusedWhileRetryIsPending() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        rejectCurrentAnalysis(submitted.verificationId());
+
+        assertThrows(
+                VerificationCommandConflictException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+    }
+
+    /**
+     * Rejects one specific analysis. This class shares its database across tests, so claiming "the next
+     * pending" would happily pick up a leftover from another test.
+     */
+    private void rejectCurrentAnalysis(Long verificationId) {
+        inTransaction(() -> {
+            verificationAnalysisRepository.findByVerification_Id(verificationId)
+                    .orElseThrow()
+                    .startProcessing(clock.instant());
+            return null;
+        });
+        VerificationAnalysis analysis = verificationAnalysisRepository
+                .findByVerification_Id(verificationId).orElseThrow();
+        VerificationAnalysisClaim claim = new VerificationAnalysisClaim(
+                analysis.getId(),
+                analysis.getAnalysisRequestId(),
+                analysis.getAttemptCount()
+        );
+        assertTrue(analysisResultService.completeSuccess(claim, new VerificationAnalysisSuccessResult(
+                AnalysisRecommendation.REJECT_CANDIDATE,
+                VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1,
+                new VerificationAnalysisProvider.Result(
+                        "synthetic-model",
+                        new VerificationAnalysisObservation(
+                                false,
+                                new BigDecimal("0.1000"),
+                                false,
+                                true,
+                                VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                        )
+                )
+        )));
     }
 
     @Test

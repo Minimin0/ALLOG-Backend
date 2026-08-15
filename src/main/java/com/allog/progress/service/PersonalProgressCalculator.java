@@ -137,9 +137,6 @@ public final class PersonalProgressCalculator {
                         "verification scheduledDate is not a participation-eligible scheduled opportunity"
                 );
             }
-            if (verification.getStatus() == VerificationStatus.RETRY_REQUIRED) {
-                throw new IllegalStateException("RETRY_REQUIRED is not supported by the MVP progress contract");
-            }
             if (verification.getScheduledDate().isAfter(today)
                     && verification.getStatus().countsAsProgress()) {
                 throw new IllegalStateException("future scheduled opportunity must not be approved");
@@ -178,6 +175,10 @@ public final class PersonalProgressCalculator {
         return OpportunityOutcome.FAILED;
     }
 
+    /**
+     * RETRY_REQUIRED is deliberately absent: the decision is not pending on us, it is pending on the
+     * member. The opportunity stays OPEN until its deadline passes and then FAILS like an unused one.
+     */
     private boolean isPendingDecision(VerificationStatus status) {
         return status == VerificationStatus.SUBMITTED
                 || status == VerificationStatus.PROCESSING

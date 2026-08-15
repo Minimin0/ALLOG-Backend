@@ -204,6 +204,29 @@ public class VerificationAnalysis extends BaseTimeEntity {
         this.completedAt = completedAt;
     }
 
+    /**
+     * Re-queues this analysis for the guided retry's submission. The criteria reference is deliberately
+     * left untouched: a retry is judged against the same criteria version as the attempt it replaces.
+     */
+    public void rearmForRetry(UUID analysisRequestId) {
+        if (status != VerificationAnalysisStatus.SUCCEEDED) {
+            throw new IllegalStateException("only a completed analysis can be re-armed for a retry");
+        }
+        this.analysisRequestId = Objects.requireNonNull(analysisRequestId, "analysisRequestId must not be null");
+        this.status = VerificationAnalysisStatus.PENDING;
+        this.recommendation = null;
+        this.reasonCode = null;
+        this.providerModel = null;
+        this.objectPresence = null;
+        this.relevanceScore = null;
+        this.anomalyDetected = null;
+        this.framedProperly = null;
+        this.failureCode = null;
+        this.attemptCount = 0;
+        this.lastAttemptAt = null;
+        this.completedAt = null;
+    }
+
     public Long getId() {
         return id;
     }
