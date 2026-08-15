@@ -43,6 +43,10 @@ public interface VerificationRepository extends JpaRepository<Verification, Long
             @Param("scheduledDate") LocalDate scheduledDate
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select verification from Verification verification where verification.id = :verificationId")
+    Optional<Verification> findByIdForUpdate(@Param("verificationId") Long verificationId);
+
     List<Verification> findAllByGroupMember_IdAndRoutineSchedule_IdAndStatusAndScheduledDateBetweenOrderByScheduledDateAsc(
             Long groupMemberId,
             Long routineScheduleId,

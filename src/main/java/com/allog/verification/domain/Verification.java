@@ -78,6 +78,10 @@ public class Verification extends BaseTimeEntity {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
 
+    /** Why a person rejected this, kept so the member is not told "no" without a reason. */
+    @Column(name = "review_note", length = 500)
+    private String reviewNote;
+
     protected Verification() {
     }
 
@@ -156,8 +160,9 @@ public class Verification extends BaseTimeEntity {
         );
     }
 
-    public void reject() {
+    public void reject(String reviewNote) {
         transitionTo(VerificationStatus.REJECTED, VerificationStatus.PROCESSING, VerificationStatus.REVIEW_REQUIRED);
+        this.reviewNote = reviewNote;
     }
 
     public void invalidate(Clock clock) {
@@ -207,6 +212,10 @@ public class Verification extends BaseTimeEntity {
 
     public int getAttemptCount() {
         return attemptCount;
+    }
+
+    public String getReviewNote() {
+        return reviewNote;
     }
 
     private void transitionTo(VerificationStatus target, VerificationStatus... allowedSources) {

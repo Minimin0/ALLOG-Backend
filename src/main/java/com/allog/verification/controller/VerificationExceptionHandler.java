@@ -3,6 +3,7 @@ package com.allog.verification.controller;
 import com.allog.verification.service.VerificationCommandConflictException;
 import com.allog.verification.service.VerificationMediaCommandException;
 import com.allog.verification.service.VerificationMembershipNotFoundException;
+import com.allog.verification.service.VerificationNotFoundException;
 import com.allog.verification.storage.VerificationMediaStorage;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,7 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 
-@RestControllerAdvice(assignableTypes = VerificationController.class)
+@RestControllerAdvice(assignableTypes = {VerificationController.class, VerificationReviewController.class})
 public class VerificationExceptionHandler {
 
     @ExceptionHandler({
@@ -24,8 +25,8 @@ public class VerificationExceptionHandler {
         return ResponseEntity.badRequest().build();
     }
 
-    @ExceptionHandler(VerificationMembershipNotFoundException.class)
-    ResponseEntity<Void> notFound(VerificationMembershipNotFoundException ignored) {
+    @ExceptionHandler({VerificationMembershipNotFoundException.class, VerificationNotFoundException.class})
+    ResponseEntity<Void> notFound(RuntimeException ignored) {
         return ResponseEntity.notFound().build();
     }
 

@@ -72,6 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -139,6 +140,9 @@ class VerificationCommandIntegrationTest {
 
     @Autowired
     private VerificationAnalysisResultService analysisResultService;
+
+    @Autowired
+    private VerificationReviewService reviewService;
 
     @BeforeEach
     void resetMediaBoundary() {
@@ -210,14 +214,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV9() {
+    void flywayHasExactlyV1ThroughV10() {
         assertAll(
-                () -> assertEquals(9, jdbcTemplate.queryForObject(
+                () -> assertEquals(10, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '9'",
+                        "select count(*) from flyway_schema_history where version = '10'",
                         Integer.class
                 ))
         );
@@ -534,6 +538,80 @@ class VerificationCommandIntegrationTest {
                 VerificationCommandConflictException.class,
                 () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
         );
+    }
+
+    @Test
+    void operatorApprovesAVerificationTheAiHeldAndItCountsAsProgress() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+
+        Verification approved = reviewService.approve(verificationId);
+
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, approved.getStatus()),
+                () -> assertTrue(approved.getStatus().countsAsProgress()),
+                () -> assertNotNull(approved.getApprovedAt()),
+                () -> assertEquals(
+                        VerificationStatus.APPROVED,
+                        verificationRepository.findById(verificationId).orElseThrow().getStatus()
+                )
+        );
+    }
+
+    @Test
+    void operatorRejectsWithAReasonThatSurvivesTheTransaction() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+
+        reviewService.reject(verificationId, "food is not visible in the photo");
+
+        Verification rejected = verificationRepository.findById(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.REJECTED, rejected.getStatus()),
+                () -> assertEquals("food is not visible in the photo", rejected.getReviewNote()),
+                () -> assertFalse(rejected.getStatus().countsAsProgress())
+        );
+    }
+
+    @Test
+    void anAlreadySettledVerificationCannotBeSettledAgain() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+        reviewService.approve(verificationId);
+
+        assertAll(
+                () -> assertThrows(
+                        VerificationCommandConflictException.class,
+                        () -> reviewService.approve(verificationId)
+                ),
+                () -> assertThrows(
+                        VerificationCommandConflictException.class,
+                        () -> reviewService.reject(verificationId, "changed my mind")
+                ),
+                () -> assertEquals(
+                        VerificationStatus.APPROVED,
+                        verificationRepository.findById(verificationId).orElseThrow().getStatus()
+                )
+        );
+    }
+
+    /** Spends the initial submission and the guided retry, so the AI puts the verification on hold. */
+    private Long heldForReview(Fixture fixture) {
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+        rejectCurrentAnalysis(verificationId);
+
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        rejectCurrentAnalysis(verificationId);
+
+        assertEquals(
+                VerificationStatus.REVIEW_REQUIRED,
+                verificationRepository.findById(verificationId).orElseThrow().getStatus()
+        );
+        return verificationId;
     }
 
     /**

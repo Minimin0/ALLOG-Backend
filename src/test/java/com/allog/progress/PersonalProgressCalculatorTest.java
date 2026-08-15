@@ -513,7 +513,7 @@ class PersonalProgressCalculatorTest {
             case REJECTED -> {
                 verification.submit(TRANSITION_CLOCK);
                 verification.startProcessing();
-                verification.reject();
+                verification.reject("operator note");
             }
             case INVALIDATED -> {
                 verification.submit(TRANSITION_CLOCK);

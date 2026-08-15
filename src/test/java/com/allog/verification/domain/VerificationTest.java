@@ -152,7 +152,7 @@ class VerificationTest {
         retry.requestRetry();
         Verification rejected = processing();
         rejected.requestReview();
-        rejected.reject();
+        rejected.reject("operator note");
 
         assertAll(
                 () -> assertEquals(VerificationStatus.RETRY_REQUIRED, retry.getStatus()),
@@ -164,7 +164,7 @@ class VerificationTest {
     void processingCanReject() {
         Verification verification = processing();
 
-        verification.reject();
+        verification.reject("operator note");
 
         assertEquals(VerificationStatus.REJECTED, verification.getStatus());
     }
@@ -242,7 +242,7 @@ class VerificationTest {
     @Test
     void blocksRejectedToApproved() {
         Verification verification = processing();
-        verification.reject();
+        verification.reject("operator note");
 
         assertThrows(IllegalStateException.class, () -> verification.approve(FIRST));
     }
