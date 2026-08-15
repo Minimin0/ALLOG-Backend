@@ -2,8 +2,10 @@ package com.allog.verification.controller;
 
 import com.allog.auth.security.AllogPrincipal;
 import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
+import com.allog.verification.service.PendingReview;
 import com.allog.verification.service.VerificationCommandConflictException;
 import com.allog.verification.service.VerificationNotFoundException;
 import com.allog.verification.service.VerificationReviewService;
@@ -17,7 +19,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-import static org.mockito.ArgumentMatchers.any;
+import java.net.URI;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -25,6 +32,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -41,6 +49,7 @@ class VerificationReviewControllerTest {
     private static final Long MEMBER_ID = 8L;
     private static final String APPROVE = "/api/v1/admin/verifications/42/approve";
     private static final String REJECT = "/api/v1/admin/verifications/42/reject";
+    private static final String QUEUE = "/api/v1/admin/verifications/pending-review";
 
     @Autowired
     private MockMvc mockMvc;
@@ -75,7 +84,8 @@ class VerificationReviewControllerTest {
     }
 
     @Test
-    void anAuthenticatedNonOperatorCannotSettleVerifications() throws Exception {
+    void anAuthenticatedNonOperatorReachesNoneOfTheAdminActions() throws Exception {
+        mockMvc.perform(reading(MEMBER_ID, QUEUE)).andExpect(status().isForbidden());
         mockMvc.perform(as(MEMBER_ID, APPROVE)).andExpect(status().isForbidden());
         mockMvc.perform(as(MEMBER_ID, REJECT)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -83,6 +93,36 @@ class VerificationReviewControllerTest {
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(reviewService);
+    }
+
+    @Test
+    void operatorReadsTheQueueWithTheAiFeedbackAndAMediaLink() throws Exception {
+        when(reviewService.reviewQueue()).thenReturn(List.of(new PendingReview(
+                42L,
+                8L,
+                3L,
+                LocalDate.parse("2026-08-11"),
+                2,
+                Instant.parse("2026-08-11T09:00:00Z"),
+                Instant.parse("2026-08-11T10:00:00Z"),
+                URI.create("https://example.invalid/photo?signed"),
+                AnalysisRecommendation.REJECT_CANDIDATE,
+                "OBSERVATION_COMPLETE",
+                false,
+                false,
+                "meal-photo-record@1"
+        )));
+
+        mockMvc.perform(reading(OPERATOR_ID, QUEUE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].verificationId").value(42))
+                .andExpect(jsonPath("$[0].userId").value(8))
+                .andExpect(jsonPath("$[0].attemptCount").value(2))
+                .andExpect(jsonPath("$[0].mediaUrl").value("https://example.invalid/photo?signed"))
+                .andExpect(jsonPath("$[0].recommendation").value("REJECT_CANDIDATE"))
+                .andExpect(jsonPath("$[0].reasonCode").value("OBSERVATION_COMPLETE"))
+                .andExpect(jsonPath("$[0].criteriaVersion").value("meal-photo-record@1"));
     }
 
     @Test
@@ -119,7 +159,18 @@ class VerificationReviewControllerTest {
     }
 
     private static MockHttpServletRequestBuilder as(Long userId, String endpoint) {
-        return post(endpoint).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return authenticate(post(endpoint), userId);
+    }
+
+    private static MockHttpServletRequestBuilder reading(Long userId, String endpoint) {
+        return authenticate(get(endpoint), userId);
+    }
+
+    private static MockHttpServletRequestBuilder authenticate(
+            MockHttpServletRequestBuilder request,
+            Long userId
+    ) {
+        return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
                 new AllogPrincipal(userId)
         )));
     }

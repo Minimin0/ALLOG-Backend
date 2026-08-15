@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -155,6 +156,32 @@ public final class S3VerificationMediaStorage implements VerificationMediaStorag
             throw configuration("verification media storage request was rejected", exception);
         } catch (SdkClientException | IOException exception) {
             throw unavailable("verification media storage is unavailable", exception);
+        }
+    }
+
+    @Override
+    public URI issueDownload(String objectKey, Instant expiresAt) {
+        Duration signatureDuration = Duration.between(clock.instant(), Objects.requireNonNull(expiresAt));
+        if (signatureDuration.isZero() || signatureDuration.isNegative()) {
+            throw new StorageException(
+                    StorageException.Reason.CONFIGURATION,
+                    "verification media download expiry must be in the future"
+            );
+        }
+        try {
+            return URI.create(presigner.presignGetObject(GetObjectPresignRequest.builder()
+                            .signatureDuration(signatureDuration)
+                            .getObjectRequest(GetObjectRequest.builder()
+                                    .bucket(bucket)
+                                    .key(requireText(objectKey, "objectKey"))
+                                    .build())
+                            .build())
+                    .url()
+                    .toString());
+        } catch (SdkClientException exception) {
+            throw unavailable("verification media download link could not be generated", exception);
+        } catch (RuntimeException exception) {
+            throw configuration("verification media download link configuration is invalid", exception);
         }
     }
 

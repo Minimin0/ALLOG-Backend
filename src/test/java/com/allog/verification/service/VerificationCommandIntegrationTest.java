@@ -595,6 +595,48 @@ class VerificationCommandIntegrationTest {
         );
     }
 
+    @Test
+    void reviewQueueReturnsOnlyHeldVerificationsOldestFirstWithTheirEvidence() {
+        Long older = heldForReview(fixture(true));
+        Long newer = heldForReview(fixture(true));
+        // settled and in-flight verifications must not appear in the queue
+        Long approved = heldForReview(fixture(true));
+        reviewService.approve(approved);
+        Fixture submittedOnly = fixture(true);
+        mediaUploadService.issueCurrentUpload(
+                submittedOnly.groupId(), submittedOnly.userId(), "image/jpeg", PHOTO.length
+        );
+        Long submitted = mediaSubmissionService
+                .submitCurrent(submittedOnly.groupId(), submittedOnly.userId())
+                .verificationId();
+
+        List<PendingReview> queue = reviewService.reviewQueue();
+
+        List<Long> queuedIds = queue.stream().map(PendingReview::verificationId).toList();
+        PendingReview held = queue.stream()
+                .filter(item -> item.verificationId().equals(older))
+                .findFirst()
+                .orElseThrow();
+        assertAll(
+                () -> assertTrue(queuedIds.containsAll(List.of(older, newer))),
+                () -> assertTrue(queuedIds.indexOf(older) < queuedIds.indexOf(newer), "oldest first"),
+                () -> assertFalse(queuedIds.contains(approved)),
+                () -> assertFalse(queuedIds.contains(submitted)),
+                // the operator gets the AI's own feedback plus something they can actually open
+                () -> assertEquals(AnalysisRecommendation.REJECT_CANDIDATE, held.recommendation()),
+                () -> assertEquals("OBSERVATION_COMPLETE", held.reasonCode()),
+                () -> assertEquals(false, held.objectPresence()),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        held.criteriaVersion()
+                ),
+                () -> assertEquals(2, held.attemptCount()),
+                () -> assertNotNull(held.mediaUrl()),
+                () -> assertNotNull(held.userId()),
+                () -> assertNotNull(held.groupId())
+        );
+    }
+
     /** Spends the initial submission and the guided retry, so the AI puts the verification on hold. */
     private Long heldForReview(Fixture fixture) {
         mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
@@ -1095,6 +1137,14 @@ class VerificationCommandIntegrationTest {
                 throw new StorageException(StorageException.Reason.NOT_FOUND, "missing test object");
             }
             return new StoredMedia(objectKey, content.length, inspection.contentType(), content);
+        }
+
+        @Override
+        public URI issueDownload(String objectKey, Instant expiresAt) {
+            if (!contents.containsKey(objectKey)) {
+                throw new StorageException(StorageException.Reason.NOT_FOUND, "missing test object");
+            }
+            return URI.create("https://download.example.invalid/" + objectKey);
         }
 
         @Override

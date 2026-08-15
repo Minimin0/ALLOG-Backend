@@ -4,12 +4,14 @@ import com.allog.auth.security.AllogPrincipal;
 import com.allog.verification.analysis.controller.VerificationAnalysisOperationsProperties;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
+import com.allog.verification.service.PendingReview;
 import com.allog.verification.service.VerificationReviewService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.constraints.Positive;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -26,7 +29,7 @@ import java.util.Objects;
  * worker controls, so there is still exactly one place that says who may act as an operator.
  */
 @RestController
-@RequestMapping("/api/v1/admin/verifications/{verificationId}")
+@RequestMapping("/api/v1/admin/verifications")
 public class VerificationReviewController {
 
     private final VerificationReviewService reviewService;
@@ -40,7 +43,14 @@ public class VerificationReviewController {
         this.properties = Objects.requireNonNull(properties);
     }
 
-    @PostMapping("/approve")
+    /** The work queue: everything an operator still has to settle, oldest first. */
+    @GetMapping("/pending-review")
+    public List<PendingReview> pendingReview(@AuthenticationPrincipal AllogPrincipal principal) {
+        requireOperator(principal);
+        return reviewService.reviewQueue();
+    }
+
+    @PostMapping("/{verificationId}/approve")
     public ReviewResponse approve(
             @Positive @PathVariable Long verificationId,
             @AuthenticationPrincipal AllogPrincipal principal
@@ -49,7 +59,7 @@ public class VerificationReviewController {
         return ReviewResponse.from(reviewService.approve(verificationId));
     }
 
-    @PostMapping("/reject")
+    @PostMapping("/{verificationId}/reject")
     public ReviewResponse reject(
             @Positive @PathVariable Long verificationId,
             @AuthenticationPrincipal AllogPrincipal principal,
