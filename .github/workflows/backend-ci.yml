@@ -1,0 +1,107 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# Supersede stale PR runs, but never cancel a main run: every commit that lands
+# on main has to keep its own verification result.
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend-ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Literals, not ${{ env.* }}: the env context is not available to
+      # jobs.<job_id>.services. These are throwaway credentials for an ephemeral
+      # container that lives for the length of one job and holds only fixtures.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: allog_ci
+          MYSQL_ROOT_PASSWORD: ci-local-throwaway
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-local-throwaway"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Third-party action, so pinned to a full commit SHA (v6.3.0).
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+
+      # The group-join concurrency tests are gated on GROUP_JOIN_CONCURRENCY_DB_URL
+      # and skip without it, because H2 locking proves nothing about InnoDB. Wiring
+      # the service container here is what makes them actually run.
+      # No Anthropic/OpenAI/S3 keys are set, so those suites stay skipped by design.
+      - name: Java tests
+        env:
+          GROUP_JOIN_CONCURRENCY_DB_URL: jdbc:mysql://127.0.0.1:3306/allog_ci?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+          GROUP_JOIN_CONCURRENCY_DB_USERNAME: root
+          GROUP_JOIN_CONCURRENCY_DB_PASSWORD: ci-local-throwaway
+        run: ./gradlew test --rerun-tasks --console=plain
+
+      # Without this the MySQL coverage is unenforced: if the wiring above ever
+      # breaks, these tests go back to skipping and the build stays green.
+      - name: Assert InnoDB concurrency tests ran
+        run: |
+          report=build/test-results/test/TEST-com.allog.group.service.RoutineGroupJoinConcurrencyTest.xml
+          test -f "$report"
+          counts=$(grep -o 'tests="[0-9]*" skipped="[0-9]*"' "$report" | head -1)
+          echo "group-join concurrency: $counts"
+          if ! grep -q 'skipped="0"' "$report"; then
+            echo "concurrency tests did not run against MySQL" >&2
+            exit 1
+          fi
+
+      # Separate from tests on purpose: a build.gradle dependency break passes the
+      # test task and only fails here.
+      - name: Build executable jar
+        run: ./gradlew bootJar --console=plain
+
+      - name: Verify packaged jar
+        run: |
+          jars=(build/libs/*.jar)
+          [ ${#jars[@]} -eq 1 ]
+          jar=${jars[0]}
+          test -s "$jar"
+          manifest=$(unzip -p "$jar" META-INF/MANIFEST.MF)
+          grep -q 'Main-Class: org.springframework.boot.loader.launch.JarLauncher' <<<"$manifest"
+          grep -q 'Start-Class: com.allog.AllogApplication' <<<"$manifest"
+          # developmentOnly must not leak into the production artifact.
+          if unzip -l "$jar" | grep -qE 'BOOT-INF/lib/h2-[0-9]'; then
+            echo "H2 is developmentOnly and must not ship in the packaged jar" >&2
+            exit 1
+          fi
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: AI Coach tests
+        run: node --test "ai 개발/비서 ai 개발/ai-coach.test.mjs"
