@@ -18,12 +18,6 @@ concurrency:
   group: backend-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  # Throwaway credentials for the ephemeral service container only. This database
-  # exists for the lifetime of one job and holds nothing but test fixtures.
-  MYSQL_DATABASE: allog_ci
-  MYSQL_ROOT_PASSWORD: ci-local-throwaway
-
 jobs:
   backend-ci:
     name: Backend CI
@@ -31,15 +25,18 @@ jobs:
     timeout-minutes: 30
 
     services:
+      # Literals, not ${{ env.* }}: the env context is not available to
+      # jobs.<job_id>.services. These are throwaway credentials for an ephemeral
+      # container that lives for the length of one job and holds only fixtures.
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
-          MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE: allog_ci
+          MYSQL_ROOT_PASSWORD: ci-local-throwaway
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -p${{ env.MYSQL_ROOT_PASSWORD }}"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-local-throwaway"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -63,9 +60,9 @@ jobs:
       # No Anthropic/OpenAI/S3 keys are set, so those suites stay skipped by design.
       - name: Java tests
         env:
-          GROUP_JOIN_CONCURRENCY_DB_URL: jdbc:mysql://127.0.0.1:3306/${{ env.MYSQL_DATABASE }}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+          GROUP_JOIN_CONCURRENCY_DB_URL: jdbc:mysql://127.0.0.1:3306/allog_ci?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
           GROUP_JOIN_CONCURRENCY_DB_USERNAME: root
-          GROUP_JOIN_CONCURRENCY_DB_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
+          GROUP_JOIN_CONCURRENCY_DB_PASSWORD: ci-local-throwaway
         run: ./gradlew test --rerun-tasks --console=plain
 
       # Separate from tests on purpose: a build.gradle dependency break passes the
