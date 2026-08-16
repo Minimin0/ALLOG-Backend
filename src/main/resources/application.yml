@@ -24,6 +24,12 @@ allog:
     firebase:
       enabled: "${FIREBASE_AUTH_ENABLED:false}"
       project-id: "${FIREBASE_PROJECT_ID:}"
+  group:
+    lifecycle:
+      enabled: "${GROUP_LIFECYCLE_ENABLED:true}"
+      reconcile-delay: "${GROUP_LIFECYCLE_RECONCILE_DELAY:60s}"
+      batch-size: "${GROUP_LIFECYCLE_BATCH_SIZE:100}"
+
   verification:
     analysis:
       anthropic:

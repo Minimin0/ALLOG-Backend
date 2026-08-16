@@ -16,6 +16,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Starts a group once the creator's capacity is met.
+ *
+ * <p>Two ways in. {@link #activate(Long, Clock)} takes the group lock itself; {@link
+ * #activateLocked(RoutineGroup, Instant)} is for callers already holding it - the join that filled
+ * the last slot, the creation of a solo group, the reconciler - so a start never queues behind a
+ * lock the same transaction already owns.
+ */
 @Service
 public class RoutineGroupActivationService {
 
@@ -50,32 +58,59 @@ public class RoutineGroupActivationService {
 
         RoutineGroup group = routineGroupRepository.findByIdForUpdate(groupId)
                 .orElseThrow(() -> new IllegalArgumentException("routine group not found: " + groupId));
-        if (!group.canActivate()) {
-            throw new IllegalStateException("routine group cannot activate from " + group.getStatus());
+        activateLocked(group, clock.instant());
+    }
+
+    /**
+     * Starts a group whose row the caller already locked. Every participant is given the same instant,
+     * so the run they are measured against begins at one moment rather than per-row.
+     */
+    public void activateLocked(RoutineGroup lockedGroup, Instant activationTime) {
+        Objects.requireNonNull(lockedGroup, "lockedGroup must not be null");
+        Objects.requireNonNull(activationTime, "activationTime must not be null");
+        if (!lockedGroup.canActivate()) {
+            throw new IllegalStateException("routine group cannot activate from " + lockedGroup.getStatus());
         }
 
+        Long groupId = lockedGroup.getId();
         List<GroupMember> members = groupMemberRepository.findAllByRoutineGroup_Id(groupId);
         validatePreActivationState(members);
         List<GroupMember> participants = members.stream()
                 .filter(member -> member.getStatus() == GroupMemberStatus.JOINED)
                 .toList();
-        if (participants.isEmpty()) {
-            throw new IllegalStateException("routine group requires at least one JOINED member to activate");
+        if (participants.size() != lockedGroup.getMaxMembers()) {
+            throw new IllegalStateException(
+                    "routine group must be at capacity to activate: " + groupId
+            );
         }
-
-        RoutineSchedule schedule = routineScheduleRepository.findByRoutineGroup_Id(groupId)
-                .orElseThrow(() -> new IllegalStateException("routine schedule not found for group: " + groupId));
-        Instant activationTime = clock.instant();
-        int eligibleOpportunityCount = scheduleCalculator
-                .participationEligibleScheduledDates(schedule, activationTime)
-                .size();
-        if (group.getRequiredCompletionCount() > eligibleOpportunityCount) {
+        if (!hasEnoughRemainingOpportunities(lockedGroup, activationTime)) {
             throw new IllegalStateException(
                     "requiredCompletionCount must not exceed participation-eligible opportunity count"
             );
         }
+
         participants.forEach(member -> member.startParticipation(activationTime));
-        group.activate();
+        lockedGroup.activate();
+    }
+
+    /**
+     * Whether a group starting at this instant could still reach its goal. Read-only, so the
+     * reconciler can ask before deciding between starting a group and expiring it.
+     */
+    public boolean hasEnoughRemainingOpportunities(RoutineGroup group, Instant at) {
+        Objects.requireNonNull(group, "group must not be null");
+        Objects.requireNonNull(at, "at must not be null");
+
+        RoutineSchedule schedule = requireSchedule(group.getId());
+        int eligibleOpportunityCount = scheduleCalculator
+                .participationEligibleScheduledDates(schedule, at)
+                .size();
+        return group.getRequiredCompletionCount() <= eligibleOpportunityCount;
+    }
+
+    private RoutineSchedule requireSchedule(Long groupId) {
+        return routineScheduleRepository.findByRoutineGroup_Id(groupId)
+                .orElseThrow(() -> new IllegalStateException("routine schedule not found for group: " + groupId));
     }
 
     private void validatePreActivationState(List<GroupMember> members) {

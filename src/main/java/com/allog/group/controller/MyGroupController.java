@@ -5,6 +5,8 @@ import com.allog.group.dto.CreateRoutineGroupRequest;
 import com.allog.group.dto.MyGroupDetailResponse;
 import com.allog.group.dto.MyGroupsResponse;
 import com.allog.group.dto.RoutineGroupCreatedResponse;
+import com.allog.group.service.GroupLifecycleException;
+import com.allog.group.service.MembershipLifecycleService;
 import com.allog.group.service.MyGroupNotFoundException;
 import com.allog.group.service.MyGroupQueryService;
 import com.allog.group.service.RoutineDefinitionNotFoundException;
@@ -31,10 +33,16 @@ public class MyGroupController {
 
     private final MyGroupQueryService queryService;
     private final RoutineGroupCreationService creationService;
+    private final MembershipLifecycleService membershipLifecycleService;
 
-    public MyGroupController(MyGroupQueryService queryService, RoutineGroupCreationService creationService) {
+    public MyGroupController(
+            MyGroupQueryService queryService,
+            RoutineGroupCreationService creationService,
+            MembershipLifecycleService membershipLifecycleService
+    ) {
         this.queryService = queryService;
         this.creationService = creationService;
+        this.membershipLifecycleService = membershipLifecycleService;
     }
 
     @PostMapping
@@ -61,6 +69,28 @@ public class MyGroupController {
             @Positive @PathVariable Long groupId
     ) {
         return queryService.readMyGroup(principal.userId(), groupId);
+    }
+
+    /**
+     * The owner closes a group that has not started. A group you do not own answers 404 here, the
+     * same as everywhere else under /me.
+     */
+    @PostMapping("/{groupId}/cancel")
+    public ResponseEntity<Void> cancelGroup(
+            @AuthenticationPrincipal AllogPrincipal principal,
+            @Positive @PathVariable Long groupId
+    ) {
+        membershipLifecycleService.cancel(groupId, principal.userId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @ExceptionHandler(GroupLifecycleException.class)
+    ResponseEntity<Void> lifecycleFailure(GroupLifecycleException exception) {
+        HttpStatus status = switch (exception.reason()) {
+            case GROUP_NOT_FOUND, MEMBERSHIP_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case OWNER_MUST_CANCEL, NOT_LEAVABLE, NOT_CANCELLABLE -> HttpStatus.CONFLICT;
+        };
+        return ResponseEntity.status(status).build();
     }
 
     @ExceptionHandler({MyGroupNotFoundException.class, RoutineDefinitionNotFoundException.class})

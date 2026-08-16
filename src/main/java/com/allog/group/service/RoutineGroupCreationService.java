@@ -19,7 +19,10 @@ import com.allog.verification.template.domain.VerificationTemplateKey;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.allog.routine.schedule.RoutineScheduleCalculator;
+
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -39,7 +42,9 @@ public class RoutineGroupCreationService {
     private final RoutineDefinitionRepository routineDefinitionRepository;
     private final UserRepository userRepository;
     private final VerificationTemplateCatalog verificationTemplateCatalog;
+    private final RoutineGroupActivationService activationService;
     private final Clock clock;
+    private final RoutineScheduleCalculator scheduleCalculator = new RoutineScheduleCalculator();
 
     public RoutineGroupCreationService(
             RoutineGroupRepository routineGroupRepository,
@@ -48,6 +53,7 @@ public class RoutineGroupCreationService {
             RoutineDefinitionRepository routineDefinitionRepository,
             UserRepository userRepository,
             VerificationTemplateCatalog verificationTemplateCatalog,
+            RoutineGroupActivationService activationService,
             Clock clock
     ) {
         this.routineGroupRepository = Objects.requireNonNull(routineGroupRepository);
@@ -56,6 +62,7 @@ public class RoutineGroupCreationService {
         this.routineDefinitionRepository = Objects.requireNonNull(routineDefinitionRepository);
         this.userRepository = Objects.requireNonNull(userRepository);
         this.verificationTemplateCatalog = Objects.requireNonNull(verificationTemplateCatalog);
+        this.activationService = Objects.requireNonNull(activationService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -69,16 +76,17 @@ public class RoutineGroupCreationService {
         RoutineDefinition routineDefinition = routineDefinitionRepository.findById(request.routineDefinitionId())
                 .orElseThrow(() -> new RoutineDefinitionNotFoundException(request.routineDefinitionId()));
 
+        Instant now = clock.instant();
         RoutineGroup group = routineGroupRepository.save(newGroup(request, routineDefinition, creator));
         groupMemberRepository.save(new GroupMember(
                 group,
                 creator,
                 GroupMemberRole.OWNER,
                 GroupMemberStatus.JOINED,
-                clock.instant()
+                now
         ));
         CreateRoutineGroupRequest.Schedule schedule = request.schedule();
-        routineScheduleRepository.save(new RoutineSchedule(
+        RoutineSchedule routineSchedule = routineScheduleRepository.saveAndFlush(new RoutineSchedule(
                 group,
                 schedule.scheduleType(),
                 schedule.startDate(),
@@ -87,6 +95,20 @@ public class RoutineGroupCreationService {
                 schedule.timezone(),
                 schedule.specificDays()
         ));
+
+        // A goal the schedule cannot hold is unreachable from the first day, so it is refused here
+        // rather than discovered at the end of a run nobody could win.
+        int totalOpportunities = scheduleCalculator.totalScheduledOpportunityCount(routineSchedule);
+        if (group.getRequiredCompletionCount() > totalOpportunities) {
+            throw new IllegalArgumentException(
+                    "requiredCompletionCount must not exceed the schedule's total opportunities");
+        }
+
+        // The owner occupies a slot, so a room built for one is already full and starts immediately.
+        if (group.getMaxMembers() == 1) {
+            group.markFull();
+            activationService.activateLocked(group, now);
+        }
         return group.getId();
     }
 

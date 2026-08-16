@@ -1,6 +1,6 @@
 # Group Progress and Participation Completion
 
-이 문서는 STEP 6A-5의 읽기 전용 평가 계약이며, 참여자·그룹의 최종 DB 상태를 저장하는 정책이 아니다.
+이 문서는 Group Progress의 읽기 전용 계산과 M3-L에서 영속화된 참여자·그룹 최종화 계약을 설명한다.
 
 ## Group Progress
 
@@ -9,15 +9,13 @@
 ```text
 completedRequirementCount
 = min(member.completedCount, member.requiredCompletionCount)
-
 totalRequiredCount
 = member.requiredCompletionCount
-
 groupCompletionRate
 = completedRequirementCount / totalRequiredCount
 ```
 
-필요 횟수를 초과한 개인 수행은 개인 목표까지만 그룹 진행에 기여하므로 결과는 `0.0`부터 `1.0`사이다. 합계는 `long`과 `Math.addExact`를 사용한다. eligible 회원이 0명이면 계산 불가로 거부한다.
+필요 횟수를 초과한 개인 수행은 개인 목표까지만 그룹 진행에 기여하므로 결과는 `0.0`부터 `1.0` 사이다. 합계는 `long`과 `Math.addExact`를 사용한다. eligible 회원이 0명이면 계산 불가로 거부한다.
 
 `goalAchievedMemberCount`는 `completedCount >= requiredCompletionCount`인 회원 수이다. 저장된 `GroupMemberStatus.COMPLETED`의 수가 아니다. `pendingDecisionCount`는 eligible 회원의 판정 대기 전체 합계다.
 
@@ -28,19 +26,19 @@ groupCompletionRate
 ```text
 goalAchieved
 = completedCount >= requiredCompletionCount
-
 scheduleEnded
 = now >= finalScheduledDeadline
-
 finalizationReady
 = scheduleEnded && pendingDecisionCount == 0
 ```
 
 Finalization을 준비할 수 있을 때만 `recommendedOutcome`이 존재한다.
 
-- `goalAchieved=true` → `COMPLETED`
-- `goalAchieved=false` → `FAILED`
-- Schedule 진행 중 또는 Pending 존재 → 결과 없음
+| 평가 결과 | 최종 상태 |
+| --- | --- |
+| `goalAchieved=true` | `COMPLETED` |
+| `goalAchieved=false` | `FAILED` |
+| Schedule 진행 중 또는 pending decision 존재 | 결과를 저장하지 않음 |
 
 ## Final Scheduled Deadline
 
@@ -55,18 +53,19 @@ MON/WED/FRI
 
 실제 예정일이 0개인 Schedule은 완료로 간주하지 않고 Domain inconsistency로 거부한다. 마감과 동일한 시각부터 Schedule은 종료된다.
 
-## Why Evaluation Only
+## Persisted Group Finalization
 
-이 단계는 `GroupMember`, `RoutineGroup`, Verification을 변경하지 않는다. 조기에 `COMPLETED`를 저장하면 후속 `INVALIDATED`로 인해 성공 횟수가 줄었을 때 저장 상태를 되돌려야 한다.
+`GroupFinalizationService`는 lifecycle reconciler가 이미 `PESSIMISTIC_WRITE`로 잠근 `ACTIVE` `RoutineGroup`에 대해서만 동작한다. 공식 참여자는 현재 status가 아니라 `participationStartedAt IS NOT NULL`로 선정한다. 각 참여자의 verification을 배치 조회하고 기존 `PersonalProgressCalculator` 및 `ParticipationCompletionEvaluator`를 재사용한다.
 
-최종 종료는 향후 다음 작업이 준비된 후 하나의 Orchestration Transaction으로 구성한다.
+모든 참여자가 `finalizationReady`가 된 후에만 outcome을 먼저 전부 계산하고, 그 다음에야 `ACTIVE → COMPLETED` 또는 `ACTIVE → FAILED`를 기록한다. 하나라도 Schedule 종료 전이거나 pending decision이 있으면 어떤 row도 변경하지 않는다. 따라서 partial finalization은 발생하지 않는다.
 
-```text
-Final Verification
-→ Participation Results
-→ Score / Ranking
-→ Heart / Reward
-→ RoutineGroup Completion
-```
+그룹은 모든 공식 참여자의 outcome이 저장된 뒤 `ACTIVE → COMPLETED`가 된다. `RoutineGroup.COMPLETED`는 그룹 lifecycle이 종료됐다는 뜻이며 전원이 성공했다는 뜻은 아니다. 같은 그룹 안에서 `COMPLETED`와 `FAILED` outcome이 섞이는 것은 정상이다.
 
-Membership denominator 정책이 미확정이므로 Group Query Service를 만들지 않았다. 별도 `GroupFinalizationEvaluation`도 현재는 Group Progress와 개인 Evaluation 목록에서 동일 값을 중복하므로 최종 Orchestrator가 생길 때 추가한다.
+## Background Reconciliation과 자산 경계
+
+scheduler는 candidate ID 검색과 group별 delegation만 수행하고, 각 group은 별도 transaction에서 schedule-authoritative expiry, FULL activation, 또는 finalization을 처리한다. terminal 상태의 재처리는 no-op이며 읽기 endpoint는 lifecycle을 변경하지 않는다.
+
+M3-L finalization은 Heart와 Reward를 변경하지 않는다. Heart spend/refund, Reward policy, ranking, `successfulRoutines` 노출은 후속 milestone의 별도 product·domain 계약이다.
+
+## Known Debt: Verification Invalidation
+Verification has an APPROVED-to-INVALIDATED domain transition, but no production invalidation flow is currently connected. Before connecting invalidation to production, define a reconciliation policy for persisted GroupMember COMPLETED/FAILED outcomes and RoutineGroup COMPLETED. M3-L does not automatically reverse terminal completion; this change does not implement an invalidation policy.

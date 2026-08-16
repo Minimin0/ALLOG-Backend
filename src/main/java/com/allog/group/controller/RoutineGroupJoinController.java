@@ -1,6 +1,8 @@
 package com.allog.group.controller;
 
 import com.allog.auth.security.AllogPrincipal;
+import com.allog.group.service.GroupLifecycleException;
+import com.allog.group.service.MembershipLifecycleService;
 import com.allog.group.service.RoutineGroupJoinException;
 import com.allog.group.service.RoutineGroupJoinService;
 import jakarta.validation.constraints.Positive;
@@ -21,9 +23,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class RoutineGroupJoinController {
 
     private final RoutineGroupJoinService joinService;
+    private final MembershipLifecycleService membershipLifecycleService;
 
-    public RoutineGroupJoinController(RoutineGroupJoinService joinService) {
+    public RoutineGroupJoinController(
+            RoutineGroupJoinService joinService,
+            MembershipLifecycleService membershipLifecycleService
+    ) {
         this.joinService = joinService;
+        this.membershipLifecycleService = membershipLifecycleService;
     }
 
     @PostMapping("/{groupId}/join")
@@ -33,6 +40,25 @@ public class RoutineGroupJoinController {
     ) {
         joinService.join(groupId, principal.userId());
         return ResponseEntity.noContent().build();
+    }
+
+    /** Leaving is only for a group that has not started; repeating it is a no-op, not a failure. */
+    @PostMapping("/{groupId}/leave")
+    public ResponseEntity<Void> leave(
+            @Positive @PathVariable Long groupId,
+            @AuthenticationPrincipal AllogPrincipal principal
+    ) {
+        membershipLifecycleService.leave(groupId, principal.userId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @ExceptionHandler(GroupLifecycleException.class)
+    ResponseEntity<Void> lifecycleFailure(GroupLifecycleException exception) {
+        HttpStatus status = switch (exception.reason()) {
+            case GROUP_NOT_FOUND, MEMBERSHIP_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case OWNER_MUST_CANCEL, NOT_LEAVABLE, NOT_CANCELLABLE -> HttpStatus.CONFLICT;
+        };
+        return ResponseEntity.status(status).build();
     }
 
     @ExceptionHandler(RoutineGroupJoinException.class)

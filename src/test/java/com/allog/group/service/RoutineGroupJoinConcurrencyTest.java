@@ -19,8 +19,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.allog.routine.domain.RoutineSchedule;
+import com.allog.routine.domain.ScheduleType;
+
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -89,8 +95,10 @@ class RoutineGroupJoinConcurrencyTest {
 
         inTransaction(() -> {
             // The owner holds one slot, so a correct run lands on exactly MAX_MEMBERS and never above.
-            assertEquals(MAX_MEMBERS, joinedCount(fixture.groupId()), "capacity was oversubscribed");
-            assertEquals(RoutineGroupStatus.FULL, entityManager
+            // Filling the room also starts it, so those members are now ACTIVE rather than JOINED.
+            assertEquals(MAX_MEMBERS, activeCount(fixture.groupId()), "capacity was oversubscribed");
+            assertEquals(0, joinedCount(fixture.groupId()));
+            assertEquals(RoutineGroupStatus.ACTIVE, entityManager
                     .find(RoutineGroup.class, fixture.groupId()).getStatus());
             return null;
         });
@@ -161,6 +169,15 @@ class RoutineGroupJoinConcurrencyTest {
                     1
             );
             entityManager.persist(group);
+            entityManager.persist(new RoutineSchedule(
+                    group,
+                    ScheduleType.DAILY,
+                    LocalDate.now().minusDays(1),
+                    LocalDate.now().plusYears(1),
+                    LocalTime.of(23, 0),
+                    "Asia/Seoul",
+                    Set.of()
+            ));
             entityManager.persist(new GroupMember(
                     group,
                     owner,
@@ -171,6 +188,15 @@ class RoutineGroupJoinConcurrencyTest {
             entityManager.flush();
             return new Fixture(group.getId(), first.getId(), second.getId());
         });
+    }
+
+    private long activeCount(Long groupId) {
+        return entityManager.createQuery(
+                        "select count(m) from GroupMember m where m.routineGroup.id = :g and m.status = :s",
+                        Long.class)
+                .setParameter("g", groupId)
+                .setParameter("s", GroupMemberStatus.ACTIVE)
+                .getSingleResult();
     }
 
     private long joinedCount(Long groupId) {

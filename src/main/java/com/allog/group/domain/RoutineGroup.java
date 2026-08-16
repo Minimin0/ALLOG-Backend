@@ -156,8 +156,12 @@ public class RoutineGroup extends BaseTimeEntity {
                 : null;
     }
 
+    /**
+     * A group starts only once the creator's capacity is actually met, so this accepts FULL alone.
+     * Starting a half-empty room would change the challenge the members signed up for.
+     */
     public boolean canActivate() {
-        return status == RoutineGroupStatus.RECRUITING || status == RoutineGroupStatus.FULL;
+        return status == RoutineGroupStatus.FULL;
     }
 
     public void activate() {
@@ -171,12 +175,54 @@ public class RoutineGroup extends BaseTimeEntity {
         return status == RoutineGroupStatus.RECRUITING;
     }
 
-    /** Capacity reached. The group stays activatable: {@link #canActivate()} accepts FULL. */
+    /** Capacity reached. In practice a very short state: activation follows in the same transaction. */
     public void markFull() {
         if (status != RoutineGroupStatus.RECRUITING) {
             throw new IllegalStateException("only a RECRUITING routine group can become FULL");
         }
         status = RoutineGroupStatus.FULL;
+    }
+
+    /** Someone left before the start, so the room has a free slot again. */
+    public void reopenRecruitingAfterDeparture() {
+        if (status != RoutineGroupStatus.FULL) {
+            throw new IllegalStateException("only a FULL routine group can reopen recruiting");
+        }
+        status = RoutineGroupStatus.RECRUITING;
+    }
+
+    public boolean isBeforeStart() {
+        return status == RoutineGroupStatus.RECRUITING || status == RoutineGroupStatus.FULL;
+    }
+
+    /** The owner closed the room before it started. Not available afterwards - see the docs. */
+    public void cancelBeforeStart() {
+        if (!isBeforeStart()) {
+            throw new IllegalStateException("routine group cannot be cancelled from " + status);
+        }
+        status = RoutineGroupStatus.CANCELLED;
+    }
+
+    /**
+     * The schedule ran out of room before the group ever filled: even starting now, there are fewer
+     * remaining opportunities than the goal needs.
+     */
+    public void expireBeforeStart() {
+        if (!isBeforeStart()) {
+            throw new IllegalStateException("routine group cannot expire from " + status);
+        }
+        status = RoutineGroupStatus.EXPIRED;
+    }
+
+    /**
+     * The run is over. This says the lifecycle ended, not that everyone succeeded - a completed group
+     * can hold both completed and failed participants.
+     */
+    public void complete() {
+        if (status != RoutineGroupStatus.ACTIVE) {
+            throw new IllegalStateException("only an ACTIVE routine group can complete");
+        }
+        status = RoutineGroupStatus.COMPLETED;
     }
 
     private static String requireText(String value, String name) {

@@ -44,10 +44,10 @@ class MembershipLifecycleDomainTest {
         assertNull(member.getParticipationStartedAt());
     }
 
-    @ParameterizedTest
-    @EnumSource(value = RoutineGroupStatus.class, names = {"RECRUITING", "FULL"})
-    void activatesFromAllowedGroupStates(RoutineGroupStatus status) {
-        RoutineGroup group = group(status);
+    /** Only a room that actually filled may start; a half-empty one is not the challenge people joined. */
+    @Test
+    void activatesOnlyFromFull() {
+        RoutineGroup group = group(RoutineGroupStatus.FULL);
 
         group.activate();
 
@@ -55,7 +55,7 @@ class MembershipLifecycleDomainTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = RoutineGroupStatus.class, names = {"RECRUITING", "FULL"}, mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = RoutineGroupStatus.class, names = "FULL", mode = EnumSource.Mode.EXCLUDE)
     void rejectsActivationFromEveryOtherGroupState(RoutineGroupStatus status) {
         RoutineGroup group = group(status);
 
