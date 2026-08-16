@@ -16,13 +16,16 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
 
 /**
- * Scoped to this controller on purpose. The rest of the API answers with a bare status and changing
- * that globally is not this milestone's business, but the profile endpoints need stable machine
- * codes for the Android client.
+ * Scoped to the profile and stats controllers on purpose. The rest of the API answers with a bare
+ * status and changing that globally is not this milestone's business, but these endpoints need
+ * stable machine codes for the Android client.
+ *
+ * <p>Note what is not handled: a missing wallet behind an existing profile is a broken invariant and
+ * is left to propagate as a server error rather than dressed up as a client mistake.
  *
  * <p>No error body ever carries a submitted value - only the field name and the rule it broke.
  */
-@RestControllerAdvice(assignableTypes = UserProfileController.class)
+@RestControllerAdvice(assignableTypes = {UserProfileController.class, UserStatsController.class})
 public class UserProfileExceptionHandler {
 
     private static final String VALIDATION_MESSAGE = "입력값을 확인해 주세요.";
