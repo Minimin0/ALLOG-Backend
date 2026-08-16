@@ -1,5 +1,6 @@
 package com.allog.user.service;
 
+import com.allog.heart.service.HeartAccountService;
 import com.allog.user.domain.User;
 import com.allog.user.domain.UserOnboarding;
 import com.allog.user.domain.UserProfile;
@@ -33,15 +34,18 @@ public class UserProfileCreationService {
     private final UserRepository userRepository;
     private final UserProfileRepository profileRepository;
     private final UserOnboardingRepository onboardingRepository;
+    private final HeartAccountService heartAccountService;
 
     public UserProfileCreationService(
             UserRepository userRepository,
             UserProfileRepository profileRepository,
-            UserOnboardingRepository onboardingRepository
+            UserOnboardingRepository onboardingRepository,
+            HeartAccountService heartAccountService
     ) {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.profileRepository = Objects.requireNonNull(profileRepository);
         this.onboardingRepository = Objects.requireNonNull(onboardingRepository);
+        this.heartAccountService = Objects.requireNonNull(heartAccountService);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -68,6 +72,10 @@ public class UserProfileCreationService {
                 onboardingRequest.getMealsPerDay(),
                 onboardingRequest.getPreferredGroupDurationDays()
         ));
+
+        // Same transaction as the profile: finishing onboarding is what earns the hearts, so a
+        // member never ends up with one and not the other.
+        heartAccountService.grantInitialHearts(userId, profile.getId());
 
         return UserProfileResponse.from(userId, profile, onboarding);
     }
