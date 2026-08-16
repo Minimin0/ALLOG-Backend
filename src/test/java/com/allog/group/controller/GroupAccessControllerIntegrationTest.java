@@ -120,14 +120,63 @@ class GroupAccessControllerIntegrationTest {
         });
     }
 
+    @Test
+    void inviteJoinWithInsufficientHeartsReturnsConflictAndRollsBack() throws Exception {
+        Fixture fixture = fixture(GroupVisibility.PRIVATE, RoutineGroupStatus.RECRUITING, 2, 0);
+
+        mockMvc.perform(authenticated(post("/api/v1/me/groups/{groupId}/invite", fixture.groupId()), fixture.ownerUserId()))
+                .andExpect(status().isOk());
+        String code = inTransaction(() -> inviteRepository.findByRoutineGroup_Id(fixture.groupId()).orElseThrow().getCode());
+
+        mockMvc.perform(authenticated(post("/api/v1/groups/join-by-invite")
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + code + "\"}"), fixture.guestUserId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_HEARTS"));
+
+        inTransaction(() -> {
+            assertEquals(0, balance(fixture.guestUserId()));
+            assertEquals(RoutineGroupStatus.RECRUITING,
+                    entityManager.find(RoutineGroup.class, fixture.groupId()).getStatus());
+            assertEquals(1L, entityManager.createQuery(
+                            "select count(m) from GroupMember m where m.routineGroup.id = :groupId", Long.class)
+                    .setParameter("groupId", fixture.groupId())
+                    .getSingleResult());
+            return null;
+        });
+    }
+
+    @Test
+    void inviteJoinRejectsGroupThatIsNoLongerJoinable() throws Exception {
+        Fixture fixture = fixture(GroupVisibility.PRIVATE, RoutineGroupStatus.FULL, 2);
+
+        mockMvc.perform(authenticated(post("/api/v1/me/groups/{groupId}/invite", fixture.groupId()), fixture.ownerUserId()))
+                .andExpect(status().isOk());
+        String code = inTransaction(() -> inviteRepository.findByRoutineGroup_Id(fixture.groupId()).orElseThrow().getCode());
+
+        mockMvc.perform(authenticated(post("/api/v1/groups/join-by-invite")
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + code + "\"}"), fixture.guestUserId()))
+                .andExpect(status().isConflict());
+    }
+
     private Fixture fixture(GroupVisibility visibility, RoutineGroupStatus statusValue, int maxMembers) {
+        return fixture(visibility, statusValue, maxMembers, 3);
+    }
+
+    private Fixture fixture(
+            GroupVisibility visibility,
+            RoutineGroupStatus statusValue,
+            int maxMembers,
+            int guestHeartBalance
+    ) {
         return inTransaction(() -> {
             User owner = User.create();
             User guest = User.create();
             RoutineDefinition definition = new RoutineDefinition("routine", "description");
             entityManager.persist(owner);
             entityManager.persist(guest);
-            entityManager.persist(HeartWallet.openWith(guest, 3));
+            entityManager.persist(HeartWallet.openWith(guest, guestHeartBalance));
             entityManager.persist(definition);
             RoutineGroup group = new RoutineGroup(
                     definition, owner, "group", visibility, statusValue, maxMembers, 1);

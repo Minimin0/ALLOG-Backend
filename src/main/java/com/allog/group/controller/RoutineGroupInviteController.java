@@ -4,7 +4,9 @@ import com.allog.auth.security.AllogPrincipal;
 import com.allog.group.dto.GroupInviteResponse;
 import com.allog.group.dto.JoinGroupByInviteRequest;
 import com.allog.group.service.GroupInviteException;
+import com.allog.group.service.RoutineGroupJoinException;
 import com.allog.group.service.RoutineGroupInviteService;
+import com.allog.heart.service.InsufficientHeartsException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.util.Objects;
@@ -49,6 +51,21 @@ public class RoutineGroupInviteController {
         HttpStatus status = switch (exception.reason()) {
             case GROUP_NOT_FOUND, INVITE_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case NOT_PRIVATE -> HttpStatus.CONFLICT;
+        };
+        return ResponseEntity.status(status).build();
+    }
+
+    @ExceptionHandler(InsufficientHeartsException.class)
+    ResponseEntity<GroupHeartErrorResponse> insufficientHearts(InsufficientHeartsException ignored) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new GroupHeartErrorResponse("INSUFFICIENT_HEARTS"));
+    }
+
+    @ExceptionHandler(RoutineGroupJoinException.class)
+    ResponseEntity<Void> joinFailure(RoutineGroupJoinException exception) {
+        HttpStatus status = switch (exception.reason()) {
+            case GROUP_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case ALREADY_JOINED, NOT_JOINABLE, GROUP_FULL, PRIVATE_GROUP_REQUIRES_INVITE -> HttpStatus.CONFLICT;
         };
         return ResponseEntity.status(status).build();
     }
