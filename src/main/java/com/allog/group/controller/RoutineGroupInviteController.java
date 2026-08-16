@@ -1,63 +1,56 @@
 package com.allog.group.controller;
-import com.allog.heart.service.InsufficientHeartsException;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.group.service.GroupLifecycleException;
-import com.allog.group.service.MembershipLifecycleService;
+import com.allog.group.dto.GroupInviteResponse;
+import com.allog.group.dto.JoinGroupByInviteRequest;
+import com.allog.group.service.GroupInviteException;
 import com.allog.group.service.RoutineGroupJoinException;
-import com.allog.group.service.RoutineGroupJoinService;
+import com.allog.group.service.RoutineGroupInviteService;
+import com.allog.heart.service.InsufficientHeartsException;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * Lives outside the /me namespace: the caller is joining a group that is not theirs yet.
- */
 @RestController
-@RequestMapping("/api/v1/groups")
-public class RoutineGroupJoinController {
+@RequestMapping("/api/v1")
+public class RoutineGroupInviteController {
+    private final RoutineGroupInviteService inviteService;
 
-    private final RoutineGroupJoinService joinService;
-    private final MembershipLifecycleService membershipLifecycleService;
-
-    public RoutineGroupJoinController(
-            RoutineGroupJoinService joinService,
-            MembershipLifecycleService membershipLifecycleService
-    ) {
-        this.joinService = joinService;
-        this.membershipLifecycleService = membershipLifecycleService;
+    public RoutineGroupInviteController(RoutineGroupInviteService inviteService) {
+        this.inviteService = Objects.requireNonNull(inviteService);
     }
 
-    @PostMapping("/{groupId}/join")
+    @PostMapping("/me/groups/{groupId}/invite")
+    public GroupInviteResponse issue(
+            @PathVariable @Positive Long groupId,
+            @AuthenticationPrincipal AllogPrincipal principal
+    ) {
+        return inviteService.issue(groupId, principal.userId());
+    }
+
+    @PostMapping("/groups/join-by-invite")
     public ResponseEntity<Void> join(
-            @Positive @PathVariable Long groupId,
+            @Valid @RequestBody JoinGroupByInviteRequest request,
             @AuthenticationPrincipal AllogPrincipal principal
     ) {
-        joinService.join(groupId, principal.userId());
+        inviteService.joinByCode(request.code(), principal.userId());
         return ResponseEntity.noContent().build();
     }
 
-    /** Leaving is only for a group that has not started; repeating it is a no-op, not a failure. */
-    @PostMapping("/{groupId}/leave")
-    public ResponseEntity<Void> leave(
-            @Positive @PathVariable Long groupId,
-            @AuthenticationPrincipal AllogPrincipal principal
-    ) {
-        membershipLifecycleService.leave(groupId, principal.userId());
-        return ResponseEntity.noContent().build();
-    }
-
-    @ExceptionHandler(GroupLifecycleException.class)
-    ResponseEntity<Void> lifecycleFailure(GroupLifecycleException exception) {
+    @ExceptionHandler(GroupInviteException.class)
+    ResponseEntity<Void> inviteFailure(GroupInviteException exception) {
         HttpStatus status = switch (exception.reason()) {
-            case GROUP_NOT_FOUND, MEMBERSHIP_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case OWNER_MUST_CANCEL, NOT_LEAVABLE, NOT_CANCELLABLE -> HttpStatus.CONFLICT;
+            case GROUP_NOT_FOUND, INVITE_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case NOT_PRIVATE -> HttpStatus.CONFLICT;
         };
         return ResponseEntity.status(status).build();
     }

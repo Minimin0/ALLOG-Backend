@@ -28,21 +28,21 @@ class HeartPersistenceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void appliesFlywayV15BeforeJpaValidation() {
+    void appliesFlywayV16BeforeJpaValidation() {
         assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '15' AND success = TRUE",
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '16' AND success = TRUE",
                 Integer.class));
     }
 
     @Test
-    void migrationSetIsExactlyV1ThroughV15() {
+    void migrationSetIsExactlyV1ThroughV16() {
         List<String> versions = jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE AND version IS NOT NULL"
                         + " ORDER BY CAST(version AS INT)", String.class);
 
         assertEquals(
                 List.of("1", "2", "3", "4", "5", "6", "7", "8", "9",
-                        "10", "11", "12", "13", "14", "15"),
+                        "10", "11", "12", "13", "14", "15", "16"),
                 versions);
     }
 

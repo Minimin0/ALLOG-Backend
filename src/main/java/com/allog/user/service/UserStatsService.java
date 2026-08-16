@@ -1,6 +1,8 @@
 package com.allog.user.service;
 
 import com.allog.heart.service.HeartAccountService;
+import com.allog.group.domain.GroupMemberStatus;
+import com.allog.group.repository.GroupMemberRepository;
 import com.allog.reward.repository.VerificationRewardRepository;
 import com.allog.user.dto.UserStatsResponse;
 import com.allog.user.repository.UserProfileRepository;
@@ -20,14 +22,17 @@ public class UserStatsService {
     private final UserProfileRepository profileRepository;
     private final HeartAccountService heartAccountService;
     private final VerificationRewardRepository rewardRepository;
+    private final GroupMemberRepository groupMemberRepository;
 
     public UserStatsService(
             UserProfileRepository profileRepository,
             HeartAccountService heartAccountService,
+            GroupMemberRepository groupMemberRepository,
             VerificationRewardRepository rewardRepository
     ) {
         this.profileRepository = Objects.requireNonNull(profileRepository);
         this.heartAccountService = Objects.requireNonNull(heartAccountService);
+        this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
         this.rewardRepository = Objects.requireNonNull(rewardRepository);
     }
 
@@ -39,7 +44,8 @@ public class UserStatsService {
         }
         return new UserStatsResponse(
                 heartAccountService.balanceOf(userId),
-                rewardRepository.sumPointsByUserId(userId)
+                rewardRepository.sumPointsByUserId(userId),
+                groupMemberRepository.countByUser_IdAndStatus(userId, GroupMemberStatus.COMPLETED)
         );
     }
 }

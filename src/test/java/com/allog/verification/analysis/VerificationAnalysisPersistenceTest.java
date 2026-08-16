@@ -313,14 +313,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV15() {
+    void flywayAppliedExactlyV1ThroughV16() {
         assertAll(
-                () -> assertEquals(15, jdbcTemplate.queryForObject(
+                () -> assertEquals(16, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '15' and success = true",
+                        "select count(*) from flyway_schema_history where version = '16' and success = true",
                         Integer.class
                 ))
         );
