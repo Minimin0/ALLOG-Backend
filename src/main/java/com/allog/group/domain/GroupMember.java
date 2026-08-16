@@ -109,10 +109,54 @@ public class GroupMember extends BaseTimeEntity {
 
     public void startParticipation(Instant activationTime) {
         Instant startedAt = Objects.requireNonNull(activationTime, "activationTime must not be null");
-        if (status != GroupMemberStatus.JOINED || participationStartedAt != null) {
-            throw new IllegalStateException("only a not-yet-started JOINED member can start participation");
-        }
+        requireNotYetStarted();
         status = GroupMemberStatus.ACTIVE;
         participationStartedAt = startedAt;
+    }
+
+    /** The member walked away before the group started. Their row stays, so they cannot rejoin. */
+    public void leaveBeforeStart() {
+        requireNotYetStarted();
+        status = GroupMemberStatus.LEFT;
+    }
+
+    /** The group ended before starting - cancelled or expired - and took its members with it. */
+    public void removeBeforeStart() {
+        requireNotYetStarted();
+        status = GroupMemberStatus.REMOVED;
+    }
+
+    public void completeParticipation() {
+        requireFinalisable();
+        status = GroupMemberStatus.COMPLETED;
+    }
+
+    public void failParticipation() {
+        requireFinalisable();
+        status = GroupMemberStatus.FAILED;
+    }
+
+    /**
+     * Whether this member counts as an official participant. The start timestamp is the contract,
+     * not the current status, so a finalised member still counts toward the run they took part in.
+     */
+    public boolean hasStartedParticipation() {
+        return participationStartedAt != null;
+    }
+
+    private void requireNotYetStarted() {
+        if (status != GroupMemberStatus.JOINED || participationStartedAt != null) {
+            throw new IllegalStateException("member is not a not-yet-started JOINED member");
+        }
+    }
+
+    /** Only a running participant can be finalised, and only once. */
+    private void requireFinalisable() {
+        if (status != GroupMemberStatus.ACTIVE) {
+            throw new IllegalStateException("only an ACTIVE member can be finalised");
+        }
+        if (participationStartedAt == null) {
+            throw new IllegalStateException("ACTIVE member must have participationStartedAt");
+        }
     }
 }

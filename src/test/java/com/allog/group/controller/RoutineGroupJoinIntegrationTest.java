@@ -100,8 +100,9 @@ class RoutineGroupJoinIntegrationTest {
         });
     }
 
+    /** The join that fills the room also starts it, in the same transaction. */
     @Test
-    void marksGroupFullWhenTheOwnerAndJoinerFillCapacity() throws Exception {
+    void startsTheGroupWhenTheOwnerAndJoinerFillCapacity() throws Exception {
         Fixture fixture = fixture(2, RoutineGroupStatus.RECRUITING, true);
 
         mockMvc.perform(join(fixture.groupId(), fixture.joinerId()))
@@ -110,8 +111,9 @@ class RoutineGroupJoinIntegrationTest {
         inTransaction(() -> {
             assertAll(
                     // The owner occupies one of the two slots.
-                    () -> assertEquals(RoutineGroupStatus.FULL, group(fixture.groupId()).getStatus()),
-                    () -> assertEquals(2, joinedCount(fixture.groupId()))
+                    () -> assertEquals(RoutineGroupStatus.ACTIVE, group(fixture.groupId()).getStatus()),
+                    () -> assertEquals(0, joinedCount(fixture.groupId())),
+                    () -> assertEquals(2, activeCount(fixture.groupId()))
             );
             return null;
         });
@@ -178,7 +180,7 @@ class RoutineGroupJoinIntegrationTest {
     }
 
     @Test
-    void leavesVerificationBindingAndScheduleUntouchedAndKeepsTheFullGroupActivatable() throws Exception {
+    void leavesVerificationBindingAndScheduleUntouchedWhenTheGroupStarts() throws Exception {
         Fixture fixture = fixture(2, RoutineGroupStatus.RECRUITING, true);
 
         mockMvc.perform(join(fixture.groupId(), fixture.joinerId()))
@@ -187,7 +189,7 @@ class RoutineGroupJoinIntegrationTest {
         inTransaction(() -> {
             RoutineGroup group = group(fixture.groupId());
             assertAll(
-                    () -> assertEquals(RoutineGroupStatus.FULL, group.getStatus()),
+                    () -> assertEquals(RoutineGroupStatus.ACTIVE, group.getStatus()),
                     () -> assertTrue(group.hasVerificationBinding()),
                     () -> assertEquals(
                             VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1,
@@ -199,9 +201,8 @@ class RoutineGroupJoinIntegrationTest {
             return null;
         });
 
-        // A FULL group must still activate, otherwise filling a group would strand it forever.
-        activationService.activate(fixture.groupId(), Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC));
-
+        // The join already started it, so no separate activation step is needed - and the members
+        // it started are the ones now running.
         inTransaction(() -> {
             RoutineGroup group = group(fixture.groupId());
             assertAll(
@@ -283,6 +284,15 @@ class RoutineGroupJoinIntegrationTest {
                         GroupMember.class)
                 .setParameter("g", groupId)
                 .setParameter("u", userId)
+                .getSingleResult();
+    }
+
+    private long activeCount(Long groupId) {
+        return entityManager.createQuery(
+                        "select count(m) from GroupMember m where m.routineGroup.id = :g and m.status = :s",
+                        Long.class)
+                .setParameter("g", groupId)
+                .setParameter("s", GroupMemberStatus.ACTIVE)
                 .getSingleResult();
     }
 

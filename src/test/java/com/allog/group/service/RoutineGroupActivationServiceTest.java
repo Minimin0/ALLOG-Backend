@@ -94,7 +94,7 @@ class RoutineGroupActivationServiceTest {
     @Test
     void atomicallyActivatesLateButFeasibleGroupWithOneClockReadAndTimestamp() {
         Fixture fixture = fixture(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 GroupMemberStatus.JOINED,
                 GroupMemberStatus.JOINED,
                 GroupMemberStatus.LEFT,
@@ -120,7 +120,7 @@ class RoutineGroupActivationServiceTest {
     @Test
     void rejectsActivationWithoutJoinedParticipant() {
         Fixture fixture = fixture(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 GroupMemberStatus.LEFT,
                 GroupMemberStatus.REMOVED
         );
@@ -128,7 +128,7 @@ class RoutineGroupActivationServiceTest {
         assertThrows(IllegalStateException.class, () -> service.activate(fixture.groupId(), CLOCK));
 
         assertEquals(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow().getStatus())
         );
     }
@@ -136,19 +136,19 @@ class RoutineGroupActivationServiceTest {
     @Test
     void rejectsActivationWithoutScheduleAndKeepsMemberJoined() {
         Fixture fixture = fixtureWithoutSchedule(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 GroupMemberStatus.JOINED
         );
 
         assertThrows(IllegalStateException.class, () -> service.activate(fixture.groupId(), CLOCK));
 
-        assertActivationUnchanged(fixture, RoutineGroupStatus.RECRUITING);
+        assertActivationUnchanged(fixture, RoutineGroupStatus.FULL);
     }
 
     @Test
     void rejectsLateActivationWhenRemainingOpportunitiesCannotMeetRequirement() {
         Fixture fixture = fixtureWithSchedule(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 5,
                 LocalDate.of(2026, 8, 11),
                 LocalDate.of(2026, 8, 13),
@@ -158,7 +158,7 @@ class RoutineGroupActivationServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.activate(fixture.groupId(), CLOCK));
 
-        assertActivationUnchanged(fixture, RoutineGroupStatus.RECRUITING);
+        assertActivationUnchanged(fixture, RoutineGroupStatus.FULL);
     }
 
     @Test
@@ -186,7 +186,7 @@ class RoutineGroupActivationServiceTest {
     @Test
     void inconsistentMemberRollsBackTheWholeActivation() {
         Fixture fixture = fixture(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 GroupMemberStatus.JOINED,
                 GroupMemberStatus.ACTIVE
         );
@@ -195,7 +195,7 @@ class RoutineGroupActivationServiceTest {
 
         Map<Long, GroupMember> members = membersById(fixture.groupId());
         assertEquals(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow().getStatus())
         );
         assertEquals(GroupMemberStatus.JOINED, members.get(fixture.memberIds().get(0)).getStatus());
@@ -207,7 +207,7 @@ class RoutineGroupActivationServiceTest {
     @Test
     void rollsBackGroupAndMemberActivationTogether() {
         Fixture fixture = fixture(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 GroupMemberStatus.JOINED,
                 GroupMemberStatus.JOINED
         );
@@ -219,7 +219,7 @@ class RoutineGroupActivationServiceTest {
 
         Map<Long, GroupMember> members = membersById(fixture.groupId());
         assertEquals(
-                RoutineGroupStatus.RECRUITING,
+                RoutineGroupStatus.FULL,
                 inTransaction(() -> routineGroupRepository.findById(fixture.groupId()).orElseThrow().getStatus())
         );
         for (Long memberId : fixture.memberIds()) {
@@ -370,13 +370,16 @@ class RoutineGroupActivationServiceTest {
             RoutineDefinition definition = new RoutineDefinition("물 마시기", null);
             entityManager.persist(owner);
             entityManager.persist(definition);
+            long joinedCount = java.util.Arrays.stream(memberStatuses)
+                    .filter(status -> status == GroupMemberStatus.JOINED)
+                    .count();
             RoutineGroup group = new RoutineGroup(
                     definition,
                     owner,
                     "건강한 물 마시기",
                     GroupVisibility.PUBLIC,
                     groupStatus,
-                    10,
+                    (int) Math.max(1, joinedCount),
                     requiredCompletionCount
             );
             entityManager.persist(group);

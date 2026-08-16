@@ -245,7 +245,7 @@ class ProductionAiCoachIntegrationTest {
     }
 
     private Fixture activeFixture(GroupMemberStatus... statuses) {
-        Fixture fixture = fixture(RoutineGroupStatus.RECRUITING, true, statuses);
+        Fixture fixture = fixture(RoutineGroupStatus.FULL, true, statuses);
         activationService.activate(fixture.groupId(), ACTIVATION_CLOCK);
         return fixture;
     }
@@ -264,13 +264,16 @@ class ProductionAiCoachIntegrationTest {
             RoutineDefinition definition = new RoutineDefinition("물 마시기", null);
             entityManager.persist(owner);
             entityManager.persist(definition);
+            long joinedCount = java.util.Arrays.stream(memberStatuses)
+                    .filter(status -> status == GroupMemberStatus.JOINED)
+                    .count();
             RoutineGroup group = new RoutineGroup(
                     definition,
                     owner,
                     "아침 물 마시기",
                     GroupVisibility.PUBLIC,
                     groupStatus,
-                    10,
+                    (int) Math.max(1, joinedCount),
                     5
             );
             entityManager.persist(group);

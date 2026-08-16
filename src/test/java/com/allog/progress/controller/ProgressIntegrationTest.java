@@ -235,7 +235,7 @@ class ProgressIntegrationTest {
         ActiveFixture fixture = inTransaction(() -> {
             User owner = persistUser();
             User other = persistUser();
-            RoutineGroup group = persistGroup(owner, visibility, RoutineGroupStatus.RECRUITING, 3);
+            RoutineGroup group = persistGroup(owner, visibility, RoutineGroupStatus.FULL, 3, 2);
             RoutineSchedule schedule = new RoutineSchedule(
                     group,
                     ScheduleType.DAILY,
@@ -338,6 +338,17 @@ class ProgressIntegrationTest {
             RoutineGroupStatus status,
             int requiredCompletionCount
     ) {
+        return persistGroup(owner, visibility, status, requiredCompletionCount, 10);
+    }
+
+    /** Capacity gates activation now, so fixtures that start a group size the room to its members. */
+    private RoutineGroup persistGroup(
+            User owner,
+            GroupVisibility visibility,
+            RoutineGroupStatus status,
+            int requiredCompletionCount,
+            int maxMembers
+    ) {
         RoutineDefinition definition = new RoutineDefinition("물 마시기", null);
         entityManager.persist(definition);
         RoutineGroup group = new RoutineGroup(
@@ -346,7 +357,7 @@ class ProgressIntegrationTest {
                 "아침 물 마시기",
                 visibility,
                 status,
-                10,
+                maxMembers,
                 requiredCompletionCount
         );
         entityManager.persist(group);

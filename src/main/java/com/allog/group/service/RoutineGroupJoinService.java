@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -21,6 +22,9 @@ import java.util.Objects;
  * would both read the same count. The group row is therefore locked first, so joins on one group
  * serialize and the count is re-read behind the lock. {@code uk_group_member_group_user} remains the
  * final defence against a duplicate membership.
+ *
+ * <p>Filling the last slot also starts the group, in this same transaction and behind this same
+ * lock, so capacity and activation can never disagree.
  */
 @Service
 public class RoutineGroupJoinService {
@@ -28,17 +32,20 @@ public class RoutineGroupJoinService {
     private final RoutineGroupRepository routineGroupRepository;
     private final GroupMemberRepository groupMemberRepository;
     private final UserRepository userRepository;
+    private final RoutineGroupActivationService activationService;
     private final Clock clock;
 
     public RoutineGroupJoinService(
             RoutineGroupRepository routineGroupRepository,
             GroupMemberRepository groupMemberRepository,
             UserRepository userRepository,
+            RoutineGroupActivationService activationService,
             Clock clock
     ) {
         this.routineGroupRepository = Objects.requireNonNull(routineGroupRepository);
         this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
         this.userRepository = Objects.requireNonNull(userRepository);
+        this.activationService = Objects.requireNonNull(activationService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -75,17 +82,34 @@ public class RoutineGroupJoinService {
             );
         }
 
+        // One reading of the clock for the whole command, so the join and any activation it triggers
+        // agree on when this happened.
+        Instant now = clock.instant();
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("authenticated user not found: " + userId));
-        groupMemberRepository.save(new GroupMember(
+        GroupMember member = groupMemberRepository.saveAndFlush(new GroupMember(
                 group,
                 user,
                 GroupMemberRole.MEMBER,
                 GroupMemberStatus.JOINED,
-                clock.instant()
+                now
         ));
-        if (joined + 1 == group.getMaxMembers()) {
-            group.markFull();
+        if (joined + 1 < group.getMaxMembers()) {
+            return;
         }
+
+        // The slot that filled the room is the slot that starts it: waiting for a scheduler would
+        // leave members looking at a full room that has not begun.
+        group.markFull();
+        if (!activationService.hasEnoughRemainingOpportunities(group, now)) {
+            // The schedule ran out while this room was recruiting. Refusing here keeps a membership
+            // that could never be completed out of the database; the reconciler expires the group.
+            throw new RoutineGroupJoinException(
+                    RoutineGroupJoinException.Reason.NOT_JOINABLE,
+                    "routine group can no longer reach its goal: " + groupId
+            );
+        }
+        activationService.activateLocked(group, now);
+        Objects.requireNonNull(member.getId(), "joined member must be persisted before activation");
     }
 }
