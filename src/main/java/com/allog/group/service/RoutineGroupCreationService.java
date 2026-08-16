@@ -1,4 +1,5 @@
 package com.allog.group.service;
+import com.allog.heart.service.HeartAccountService;
 
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
@@ -43,6 +44,7 @@ public class RoutineGroupCreationService {
     private final UserRepository userRepository;
     private final VerificationTemplateCatalog verificationTemplateCatalog;
     private final RoutineGroupActivationService activationService;
+    private final HeartAccountService heartAccountService;
     private final Clock clock;
     private final RoutineScheduleCalculator scheduleCalculator = new RoutineScheduleCalculator();
 
@@ -54,6 +56,7 @@ public class RoutineGroupCreationService {
             UserRepository userRepository,
             VerificationTemplateCatalog verificationTemplateCatalog,
             RoutineGroupActivationService activationService,
+            HeartAccountService heartAccountService,
             Clock clock
     ) {
         this.routineGroupRepository = Objects.requireNonNull(routineGroupRepository);
@@ -63,6 +66,7 @@ public class RoutineGroupCreationService {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.verificationTemplateCatalog = Objects.requireNonNull(verificationTemplateCatalog);
         this.activationService = Objects.requireNonNull(activationService);
+        this.heartAccountService = Objects.requireNonNull(heartAccountService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -78,7 +82,7 @@ public class RoutineGroupCreationService {
 
         Instant now = clock.instant();
         RoutineGroup group = routineGroupRepository.save(newGroup(request, routineDefinition, creator));
-        groupMemberRepository.save(new GroupMember(
+        GroupMember ownerMember = groupMemberRepository.saveAndFlush(new GroupMember(
                 group,
                 creator,
                 GroupMemberRole.OWNER,
@@ -103,6 +107,11 @@ public class RoutineGroupCreationService {
             throw new IllegalArgumentException(
                     "requiredCompletionCount must not exceed the schedule's total opportunities");
         }
+
+        // The persisted owner membership is the immutable source id of both the debit and any
+        // future refund. A failed debit rolls back the group, membership, and schedule together.
+        heartAccountService.spendForGroupJoin(
+                creator.getId(), ownerMember.getId(), GroupParticipationHeartPolicy.GROUP_JOIN_COST);
 
         // The owner occupies a slot, so a room built for one is already full and starts immediately.
         if (group.getMaxMembers() == 1) {

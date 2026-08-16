@@ -1,4 +1,5 @@
 package com.allog.group.service;
+import com.allog.heart.service.HeartAccountService;
 
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
@@ -33,6 +34,7 @@ public class RoutineGroupJoinService {
     private final GroupMemberRepository groupMemberRepository;
     private final UserRepository userRepository;
     private final RoutineGroupActivationService activationService;
+    private final HeartAccountService heartAccountService;
     private final Clock clock;
 
     public RoutineGroupJoinService(
@@ -40,12 +42,14 @@ public class RoutineGroupJoinService {
             GroupMemberRepository groupMemberRepository,
             UserRepository userRepository,
             RoutineGroupActivationService activationService,
+            HeartAccountService heartAccountService,
             Clock clock
     ) {
         this.routineGroupRepository = Objects.requireNonNull(routineGroupRepository);
         this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
         this.userRepository = Objects.requireNonNull(userRepository);
         this.activationService = Objects.requireNonNull(activationService);
+        this.heartAccountService = Objects.requireNonNull(heartAccountService);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -94,6 +98,11 @@ public class RoutineGroupJoinService {
                 GroupMemberStatus.JOINED,
                 now
         ));
+        // A failed debit rolls the membership back while the group lock is still held.
+        // The final slot cannot transition the group to FULL or ACTIVE without a successful payment.
+        heartAccountService.spendForGroupJoin(
+                userId, member.getId(), GroupParticipationHeartPolicy.GROUP_JOIN_COST);
+
         if (joined + 1 < group.getMaxMembers()) {
             return;
         }

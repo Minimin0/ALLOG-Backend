@@ -4,6 +4,7 @@ import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
+import com.allog.heart.domain.HeartWallet;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.routine.domain.RoutineDefinition;
@@ -157,6 +158,8 @@ class RoutineGroupJoinConcurrencyTest {
             entityManager.persist(owner);
             entityManager.persist(first);
             entityManager.persist(second);
+            entityManager.persist(HeartWallet.openWith(first, 3));
+            entityManager.persist(HeartWallet.openWith(second, 3));
             RoutineDefinition definition = new RoutineDefinition("아침 식사", "설명");
             entityManager.persist(definition);
             RoutineGroup group = new RoutineGroup(

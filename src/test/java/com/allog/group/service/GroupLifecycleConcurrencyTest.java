@@ -4,6 +4,9 @@ import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
+import com.allog.heart.domain.HeartLedgerEntry;
+import com.allog.heart.domain.HeartTransactionType;
+import com.allog.heart.domain.HeartWallet;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.routine.domain.RoutineDefinition;
@@ -157,6 +160,8 @@ class GroupLifecycleConcurrencyTest {
     private Fixture fixture(int maxMembers) {
         return inTransaction(() -> {
             entityManager.createQuery("delete from Verification").executeUpdate();
+            entityManager.createQuery("delete from HeartLedgerEntry").executeUpdate();
+            entityManager.createQuery("delete from HeartWallet").executeUpdate();
             entityManager.createQuery("delete from RoutineSchedule").executeUpdate();
             entityManager.createQuery("delete from GroupMember").executeUpdate();
             entityManager.createQuery("delete from RoutineGroup").executeUpdate();
@@ -184,6 +189,17 @@ class GroupLifecycleConcurrencyTest {
             GroupMember member = new GroupMember(
                     group, memberUser, GroupMemberRole.MEMBER, GroupMemberStatus.JOINED, JOINED_AT);
             entityManager.persist(member);
+            entityManager.flush();
+            entityManager.persist(HeartWallet.openWith(owner, 2));
+            entityManager.persist(HeartWallet.openWith(memberUser, 2));
+            entityManager.persist(HeartWallet.openWith(outsider, 3));
+            GroupMember ownerMember = entityManager.createQuery(
+                    "select m from GroupMember m where m.routineGroup.id = :groupId and m.user.id = :userId", GroupMember.class)
+                    .setParameter("groupId", group.getId()).setParameter("userId", owner.getId()).getSingleResult();
+            entityManager.persist(HeartLedgerEntry.record(
+                    owner, HeartTransactionType.GROUP_JOIN_SPEND, 1, ownerMember.getId()));
+            entityManager.persist(HeartLedgerEntry.record(
+                    memberUser, HeartTransactionType.GROUP_JOIN_SPEND, 1, member.getId()));
             entityManager.flush();
 
             return new Fixture(group.getId(), memberUser.getId(), outsider.getId());

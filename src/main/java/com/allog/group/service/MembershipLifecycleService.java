@@ -1,4 +1,5 @@
 package com.allog.group.service;
+import com.allog.heart.service.HeartAccountService;
 
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
@@ -19,21 +20,24 @@ import java.util.Objects;
  * <p>Both take the group lock first, the same order joins and activation use, so a departure and a
  * last-slot join can never interleave into a room that is both full and short a member.
  *
- * <p>Neither touches hearts. Recording what happened is this milestone's job; paying anyone back is
- * M3-C's, once these events exist to trigger it.
+ * <p>All pre-start exits atomically refund the original recorded join debit. The Heart service joins
+ * this transaction; it does not open a separate transaction or recompute a current join price.
  */
 @Service
 public class MembershipLifecycleService {
 
     private final RoutineGroupRepository routineGroupRepository;
     private final GroupMemberRepository groupMemberRepository;
+    private final HeartAccountService heartAccountService;
 
     public MembershipLifecycleService(
             RoutineGroupRepository routineGroupRepository,
-            GroupMemberRepository groupMemberRepository
+            GroupMemberRepository groupMemberRepository,
+            HeartAccountService heartAccountService
     ) {
         this.routineGroupRepository = Objects.requireNonNull(routineGroupRepository);
         this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
+        this.heartAccountService = Objects.requireNonNull(heartAccountService);
     }
 
     /**
@@ -71,6 +75,7 @@ public class MembershipLifecycleService {
         }
 
         member.leaveBeforeStart();
+        heartAccountService.refundGroupJoin(member.getId());
         if (group.getStatus() == RoutineGroupStatus.FULL) {
             group.reopenRecruitingAfterDeparture();
         }
@@ -110,6 +115,7 @@ public class MembershipLifecycleService {
         List<GroupMember> members = groupMemberRepository.findAllByRoutineGroup_Id(groupId);
         for (GroupMember member : members) {
             if (member.getStatus() == GroupMemberStatus.JOINED) {
+                heartAccountService.refundGroupJoin(member.getId());
                 member.removeBeforeStart();
             }
         }

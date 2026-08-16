@@ -1,4 +1,5 @@
 package com.allog.group.controller;
+import com.allog.heart.service.InsufficientHeartsException;
 
 import com.allog.auth.security.AllogPrincipal;
 import com.allog.group.service.GroupLifecycleException;
@@ -59,6 +60,12 @@ public class RoutineGroupJoinController {
             case OWNER_MUST_CANCEL, NOT_LEAVABLE, NOT_CANCELLABLE -> HttpStatus.CONFLICT;
         };
         return ResponseEntity.status(status).build();
+    }
+
+    @ExceptionHandler(InsufficientHeartsException.class)
+    ResponseEntity<GroupHeartErrorResponse> insufficientHearts(InsufficientHeartsException ignored) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new GroupHeartErrorResponse("INSUFFICIENT_HEARTS"));
     }
 
     @ExceptionHandler(RoutineGroupJoinException.class)
