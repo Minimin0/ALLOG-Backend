@@ -4,8 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,13 +20,6 @@ class UserOnboardingTest {
     void requiresAtLeastOneInterest() {
         assertThrows(IllegalArgumentException.class, () -> onboarding(EnumSet.noneOf(InterestCategory.class)));
         assertThrows(IllegalArgumentException.class, () -> onboarding(null));
-    }
-
-    @Test
-    void collapsesDuplicateInterestsToASet() {
-        Set<InterestCategory> withDuplicates = new HashSet<>(List.of(InterestCategory.MEAL, InterestCategory.MEAL));
-
-        assertEquals(Set.of(InterestCategory.MEAL), onboarding(withDuplicates).getInterests());
     }
 
     @Test
@@ -94,9 +85,9 @@ class UserOnboardingTest {
     void rejectsClearingMandatoryOnboardingValues() {
         UserOnboarding created = onboarding(EnumSet.of(InterestCategory.MEAL));
 
-        assertThrows(NullPointerException.class, () -> created.updateCoachStyle(null));
-        assertThrows(NullPointerException.class, () -> created.updateAverageSleepHours(null));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(UserProfileValidationException.class, () -> created.updateCoachStyle(null));
+        assertThrows(UserProfileValidationException.class, () -> created.updateAverageSleepHours(null));
+        assertThrows(UserProfileValidationException.class,
                 () -> created.updateInterests(EnumSet.noneOf(InterestCategory.class)));
     }
 }

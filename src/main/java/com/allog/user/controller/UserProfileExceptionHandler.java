@@ -1,5 +1,6 @@
 package com.allog.user.controller;
 
+import com.allog.user.domain.UserProfileValidationException;
 import com.allog.user.dto.InvalidFieldException;
 import com.allog.user.dto.UnknownJsonFieldException;
 import com.allog.user.service.ProfileAlreadyExistsException;
@@ -72,13 +73,17 @@ public class UserProfileExceptionHandler {
         ));
     }
 
-    /** Domain invariants carry the rule in their message and never the value that broke it. */
-    @ExceptionHandler(IllegalArgumentException.class)
-    ResponseEntity<ApiErrorResponse> domainRejection(IllegalArgumentException exception) {
+    /**
+     * Only the domain's own validation type, never {@code IllegalArgumentException} at large: a bad
+     * argument thrown by Hibernate or the JDK is a server fault, and answering 400 with its message
+     * would both misreport it and leak internals.
+     */
+    @ExceptionHandler(UserProfileValidationException.class)
+    ResponseEntity<ApiErrorResponse> domainRejection(UserProfileValidationException exception) {
         return badRequest(new ApiErrorResponse.Error(
                 "VALIDATION_ERROR",
                 VALIDATION_MESSAGE,
-                List.of(new ApiErrorResponse.Detail(null, exception.getMessage()))
+                List.of(new ApiErrorResponse.Detail(exception.fieldName(), exception.reason()))
         ));
     }
 

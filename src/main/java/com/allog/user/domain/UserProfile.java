@@ -94,14 +94,15 @@ public class UserProfile extends BaseTimeEntity {
      */
     private static String requireNickname(String value) {
         if (value == null) {
-            throw new IllegalArgumentException("nickname must not be null");
+            throw new UserProfileValidationException("nickname", "must not be null");
         }
         String trimmed = value.trim();
         if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("nickname must not be blank");
+            throw new UserProfileValidationException("nickname", "must not be blank");
         }
         if (trimmed.length() > NICKNAME_MAX_LENGTH) {
-            throw new IllegalArgumentException("nickname must not exceed " + NICKNAME_MAX_LENGTH + " characters");
+            throw new UserProfileValidationException(
+                    "nickname", "must not exceed " + NICKNAME_MAX_LENGTH + " characters");
         }
         return trimmed;
     }
@@ -109,7 +110,7 @@ public class UserProfile extends BaseTimeEntity {
     private static LocalDate requireNotFuture(LocalDate value, LocalDate today) {
         Objects.requireNonNull(today, "today must not be null");
         if (value != null && value.isAfter(today)) {
-            throw new IllegalArgumentException("birthDate must not be in the future");
+            throw new UserProfileValidationException("birthDate", "must not be in the future");
         }
         return value;
     }

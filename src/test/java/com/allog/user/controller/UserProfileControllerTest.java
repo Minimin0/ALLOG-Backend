@@ -2,11 +2,13 @@ package com.allog.user.controller;
 
 import com.allog.auth.security.AllogPrincipal;
 import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.user.domain.UserProfileValidationException;
 import com.allog.user.dto.PatchUserProfileRequest;
 import com.allog.user.dto.UserProfileResponse;
 import com.allog.user.service.ProfileAlreadyExistsException;
 import com.allog.user.service.ProfileNotFoundException;
 import com.allog.user.service.UserProfileService;
+import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +26,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -275,5 +279,77 @@ class UserProfileControllerTest {
     private static MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request) {
         return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID))));
+    }
+
+    @Test
+    void rejectsDuplicateInterestCategoriesOnCreate() throws Exception {
+        String body = VALID_CREATE.replace(
+                "[\"hydration\", \"exercise\"]", "[\"meal\", \"meal\"]");
+
+        String payload = mockMvc.perform(authenticated(post(USERS))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("onboarding.interestRoutines"))
+                .andExpect(jsonPath("$.error.details[0].reason").value("must not contain duplicate categories"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(payload.contains("meal"), "the rejected value must not be echoed");
+        verifyNoInteractions(profileService);
+    }
+
+    @Test
+    void rejectsDuplicateInterestCategoriesOnPatch() throws Exception {
+        mockMvc.perform(authenticated(patch(ME))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"onboarding\": {\"interestRoutines\": [\"meal\", \"meal\"]}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("onboarding.interestRoutines"));
+
+        verifyNoInteractions(profileService);
+    }
+
+    @Test
+    void distinctInterestCategoriesStillPass() throws Exception {
+        when(profileService.create(eq(USER_ID), any())).thenReturn(response());
+
+        mockMvc.perform(authenticated(post(USERS))
+                        .contentType(MediaType.APPLICATION_JSON).content(VALID_CREATE))
+                .andExpect(status().isCreated());
+    }
+
+    /** A domain rejection reaches the client as a field-scoped 400, carrying the rule and no value. */
+    @Test
+    void domainValidationBecomesAFieldScopedBadRequest() throws Exception {
+        when(profileService.create(eq(USER_ID), any()))
+                .thenThrow(new UserProfileValidationException("birthDate", "must not be in the future"));
+
+        String payload = mockMvc.perform(authenticated(post(USERS))
+                        .contentType(MediaType.APPLICATION_JSON).content(VALID_CREATE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("birthDate"))
+                .andExpect(jsonPath("$.error.details[0].reason").value("must not be in the future"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(payload.contains("2000-07-30"));
+    }
+
+    /**
+     * A plain IllegalArgumentException is a server fault, not a rejected request. The advice must not
+     * catch it: it propagates out of the handler chain, which Boot renders as a 500 rather than the
+     * client seeing 400 with an internal message.
+     */
+    @Test
+    void aGenericIllegalArgumentIsNotTreatedAsAValidationFailure() {
+        when(profileService.read(USER_ID))
+                .thenThrow(new IllegalArgumentException("internal detail that must not leak"));
+
+        ServletException thrown = assertThrows(ServletException.class,
+                () -> mockMvc.perform(authenticated(get(ME))));
+
+        assertInstanceOf(IllegalArgumentException.class, thrown.getRootCause(),
+                "a generic bad argument must escape the validation advice, not become a 400");
     }
 }

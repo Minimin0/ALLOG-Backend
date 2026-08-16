@@ -12,14 +12,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.Objects;
 
 /**
  * Writes the profile and its onboarding in one transaction, so a member can never end up with a
  * profile and no onboarding - a state the read API has no sensible answer for.
+ *
+ * <p>The calendar date is supplied by the caller rather than read here, so one place decides what
+ * "today" means.
  *
  * <p>Separate from {@link UserProfileService} and {@code REQUIRES_NEW} for the same reason
  * {@code UserIdentityCreationService} is: when the unique key rejects a second concurrent create,
@@ -32,26 +33,22 @@ public class UserProfileCreationService {
     private final UserRepository userRepository;
     private final UserProfileRepository profileRepository;
     private final UserOnboardingRepository onboardingRepository;
-    private final Clock clock;
 
     public UserProfileCreationService(
             UserRepository userRepository,
             UserProfileRepository profileRepository,
-            UserOnboardingRepository onboardingRepository,
-            Clock clock
+            UserOnboardingRepository onboardingRepository
     ) {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.profileRepository = Objects.requireNonNull(profileRepository);
         this.onboardingRepository = Objects.requireNonNull(onboardingRepository);
-        this.clock = Objects.requireNonNull(clock);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public UserProfileResponse create(Long userId, CreateUserProfileRequest request) {
+    public UserProfileResponse create(Long userId, CreateUserProfileRequest request, LocalDate today) {
         // A reference, not a fetch: the principal already proves this user exists, and the FK is the
         // authority if it somehow does not.
         User user = userRepository.getReferenceById(userId);
-        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
 
         UserProfile profile = profileRepository.save(UserProfile.create(
                 user,

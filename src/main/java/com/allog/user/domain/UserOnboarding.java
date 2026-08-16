@@ -104,7 +104,7 @@ public class UserOnboarding extends BaseTimeEntity {
     ) {
         this.user = Objects.requireNonNull(user, "user must not be null");
         this.interests = requireInterests(interests);
-        this.coachStyle = Objects.requireNonNull(coachStyle, "coachStyle must not be null");
+        this.coachStyle = requireCoachStyle(coachStyle);
         this.averageSleepHours = requireSleepHours(averageSleepHours);
         this.exerciseDaysPerWeek = requireExerciseDays(exerciseDaysPerWeek);
         this.mealsPerDay = requireMeals(mealsPerDay);
@@ -136,7 +136,7 @@ public class UserOnboarding extends BaseTimeEntity {
     }
 
     public void updateCoachStyle(CoachStyle value) {
-        this.coachStyle = Objects.requireNonNull(value, "coachStyle must not be null");
+        this.coachStyle = requireCoachStyle(value);
     }
 
     public void updateAverageSleepHours(BigDecimal value) {
@@ -155,13 +155,22 @@ public class UserOnboarding extends BaseTimeEntity {
         this.preferredGroupDurationDays = requireDurationDays(value);
     }
 
+    private static CoachStyle requireCoachStyle(CoachStyle value) {
+        if (value == null) {
+            throw new UserProfileValidationException("onboarding.coachStyle", "must not be null");
+        }
+        return value;
+    }
+
     /** Defensive copy into an EnumSet: the caller's set stays theirs, and iteration order is stable. */
     private static Set<InterestCategory> requireInterests(Set<InterestCategory> value) {
         if (value == null || value.isEmpty()) {
-            throw new IllegalArgumentException("interests must contain at least one category");
+            throw new UserProfileValidationException(
+                    "onboarding.interestRoutines", "must contain at least one category");
         }
         if (value.contains(null)) {
-            throw new IllegalArgumentException("interests must not contain null");
+            throw new UserProfileValidationException(
+                    "onboarding.interestRoutines", "must not contain null");
         }
         return EnumSet.copyOf(value);
     }
@@ -171,33 +180,39 @@ public class UserOnboarding extends BaseTimeEntity {
      * turning 7.05 into 7.1 would answer a question the member did not ask.
      */
     private static BigDecimal requireSleepHours(BigDecimal value) {
-        Objects.requireNonNull(value, "averageSleepHours must not be null");
+        if (value == null) {
+            throw new UserProfileValidationException("onboarding.averageSleepHours", "must not be null");
+        }
         if (value.stripTrailingZeros().scale() > SLEEP_HOURS_SCALE) {
-            throw new IllegalArgumentException("averageSleepHours must have at most one decimal place");
+            throw new UserProfileValidationException(
+                    "onboarding.averageSleepHours", "must have at most one decimal place");
         }
         if (value.compareTo(MIN_SLEEP_HOURS) < 0 || value.compareTo(MAX_SLEEP_HOURS) > 0) {
-            throw new IllegalArgumentException("averageSleepHours must be between 0 and 24");
+            throw new UserProfileValidationException(
+                    "onboarding.averageSleepHours", "must be between 0 and 24");
         }
         return value.setScale(SLEEP_HOURS_SCALE, java.math.RoundingMode.UNNECESSARY);
     }
 
     private static int requireExerciseDays(int value) {
         if (value < MIN_EXERCISE_DAYS || value > MAX_EXERCISE_DAYS) {
-            throw new IllegalArgumentException("exerciseDaysPerWeek must be between 0 and 7");
+            throw new UserProfileValidationException(
+                    "onboarding.exerciseDaysPerWeek", "must be between 0 and 7");
         }
         return value;
     }
 
     private static int requireMeals(int value) {
         if (value < MIN_MEALS || value > MAX_MEALS) {
-            throw new IllegalArgumentException("mealsPerDay must be between 0 and 10");
+            throw new UserProfileValidationException("onboarding.mealsPerDay", "must be between 0 and 10");
         }
         return value;
     }
 
     private static int requireDurationDays(int value) {
         if (!ALLOWED_DURATION_DAYS.contains(value)) {
-            throw new IllegalArgumentException("preferredGroupDurationDays must be one of 7, 14, 30");
+            throw new UserProfileValidationException(
+                    "onboarding.preferredGroupDurationDays", "must be one of 7, 14, 30");
         }
         return value;
     }

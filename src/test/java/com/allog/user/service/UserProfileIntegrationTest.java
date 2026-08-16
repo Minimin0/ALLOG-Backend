@@ -9,6 +9,7 @@ import com.allog.user.dto.CreateUserProfileRequest;
 import com.allog.user.dto.PatchUserProfileRequest;
 import com.allog.user.dto.UserProfileResponse;
 import com.allog.user.repository.UserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,7 +53,10 @@ class UserProfileIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    // Also after: these tests commit, and a leftover profile row would block the
+    // "delete from users" cleanup other suites rely on.
     @BeforeEach
+    @AfterEach
     void clearProfileTables() {
         jdbcTemplate.update("DELETE FROM user_onboarding_interest");
         jdbcTemplate.update("DELETE FROM user_onboarding");

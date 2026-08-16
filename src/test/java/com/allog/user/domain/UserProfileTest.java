@@ -23,11 +23,11 @@ class UserProfileTest {
 
     @Test
     void rejectsNullBlankAndOverlongNickname() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(UserProfileValidationException.class,
                 () -> UserProfile.create(User.create(), null, null, null, TODAY));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(UserProfileValidationException.class,
                 () -> UserProfile.create(User.create(), "   ", null, null, TODAY));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(UserProfileValidationException.class,
                 () -> UserProfile.create(User.create(), "가".repeat(21), null, null, TODAY));
     }
 
@@ -40,11 +40,11 @@ class UserProfileTest {
 
     @Test
     void rejectsFutureBirthDateOnCreateAndUpdate() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(UserProfileValidationException.class,
                 () -> UserProfile.create(User.create(), "민지", null, TODAY.plusDays(1), TODAY));
 
         UserProfile profile = UserProfile.create(User.create(), "민지", null, null, TODAY);
-        assertThrows(IllegalArgumentException.class, () -> profile.updateBirthDate(TODAY.plusDays(1), TODAY));
+        assertThrows(UserProfileValidationException.class, () -> profile.updateBirthDate(TODAY.plusDays(1), TODAY));
     }
 
     @Test
@@ -67,7 +67,7 @@ class UserProfileTest {
 
     @Test
     void exceptionMessagesDoNotEchoTheRejectedValue() {
-        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+        UserProfileValidationException thrown = assertThrows(UserProfileValidationException.class,
                 () -> UserProfile.create(User.create(), "민지".repeat(11), null, null, TODAY));
 
         org.junit.jupiter.api.Assertions.assertFalse(thrown.getMessage().contains("민지"));

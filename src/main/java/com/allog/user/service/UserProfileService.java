@@ -15,11 +15,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.Objects;
 
 @Service
 public class UserProfileService {
+
+    /**
+     * ALLOG's calendar authority. A birth date is "in the future" against the day the member is
+     * living in, not against UTC - between 00:00 and 09:00 KST those are different dates.
+     */
+    private static final ZoneId SERVICE_ZONE = ZoneId.of("Asia/Seoul");
 
     private final UserProfileCreationService creationService;
     private final UserProfileRepository profileRepository;
@@ -58,7 +64,7 @@ public class UserProfileService {
             throw new ProfileAlreadyExistsException();
         }
         try {
-            return creationService.create(userId, request);
+            return creationService.create(userId, request, today());
         } catch (DataIntegrityViolationException violation) {
             if (profileRepository.existsByUser_Id(userId)) {
                 throw new ProfileAlreadyExistsException();
@@ -80,7 +86,7 @@ public class UserProfileService {
             profile.updateGender(request.getGender());
         }
         if (request.isBirthDatePresent()) {
-            profile.updateBirthDate(request.getBirthDate(), LocalDate.now(clock.withZone(ZoneOffset.UTC)));
+            profile.updateBirthDate(request.getBirthDate(), today());
         }
         if (request.isOnboardingPresent()) {
             patchOnboarding(onboarding, requirePresentValue(request.getOnboarding(), "onboarding"));
@@ -113,6 +119,10 @@ public class UserProfileService {
                     requirePresentValue(
                             request.getPreferredGroupDurationDays(), "onboarding.preferredGroupDurationDays"));
         }
+    }
+
+    private LocalDate today() {
+        return LocalDate.now(clock.withZone(SERVICE_ZONE));
     }
 
     /** These fields can be replaced but not cleared, so an explicit null is a bad request. */

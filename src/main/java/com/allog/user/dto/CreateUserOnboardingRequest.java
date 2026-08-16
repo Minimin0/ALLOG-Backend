@@ -103,8 +103,12 @@ public class CreateUserOnboardingRequest {
                 if (wireValue == null) {
                     throw new InvalidFieldException("onboarding.interestRoutines", "must not contain null");
                 }
-                interests.add(WireEnum.fromWire(
-                        InterestCategory.class, wireValue, "onboarding.interestRoutines"));
+                InterestCategory category = WireEnum.fromWire(
+                        InterestCategory.class, wireValue, "onboarding.interestRoutines");
+                if (!interests.add(category)) {
+                    throw new InvalidFieldException(
+                            "onboarding.interestRoutines", "must not contain duplicate categories");
+                }
             }
             return interests;
         }
