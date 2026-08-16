@@ -120,6 +120,7 @@ class UserStatsIntegrationTest {
 
         assertEquals(GRANT, stats.hearts());
         assertEquals(0, stats.rewardPoints(), "a member with no approvals has earned nothing");
+        assertEquals(0, stats.successfulRoutines());
     }
 
     @Test

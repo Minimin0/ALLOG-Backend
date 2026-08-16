@@ -1,17 +1,15 @@
 package com.allog.group.service;
 
-public class RoutineGroupJoinException extends RuntimeException {
+public class GroupInviteException extends RuntimeException {
     public enum Reason {
         GROUP_NOT_FOUND,
-        ALREADY_JOINED,
-        NOT_JOINABLE,
-        GROUP_FULL,
-        PRIVATE_GROUP_REQUIRES_INVITE
+        NOT_PRIVATE,
+        INVITE_NOT_FOUND
     }
 
     private final Reason reason;
 
-    public RoutineGroupJoinException(Reason reason, String message) {
+    public GroupInviteException(Reason reason, String message) {
         super(message);
         this.reason = reason;
     }

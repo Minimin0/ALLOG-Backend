@@ -34,4 +34,14 @@ public interface RoutineGroupRepository extends JpaRepository<RoutineGroup, Long
              order by routineGroup.id asc
             """)
     List<Long> findReconcilableIdsAfter(@Param("afterId") Long afterId, Pageable pageable);
+    @Query("""
+            select routineGroup
+              from RoutineGroup routineGroup
+              join fetch routineGroup.routineDefinition
+             where routineGroup.visibility = com.allog.group.domain.GroupVisibility.PUBLIC
+               and routineGroup.status = com.allog.group.domain.RoutineGroupStatus.RECRUITING
+             order by routineGroup.id desc
+            """)
+    List<RoutineGroup> findPublicRecruiting();
+
 }

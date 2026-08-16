@@ -4,6 +4,7 @@ import com.allog.heart.service.HeartAccountService;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
+import com.allog.group.domain.GroupVisibility;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.repository.GroupMemberRepository;
 import com.allog.group.repository.RoutineGroupRepository;
@@ -55,6 +56,15 @@ public class RoutineGroupJoinService {
 
     @Transactional
     public void join(Long groupId, Long userId) {
+        joinInternal(groupId, userId, false);
+    }
+
+    @Transactional
+    public void joinByInvite(Long groupId, Long userId) {
+        joinInternal(groupId, userId, true);
+    }
+
+    private void joinInternal(Long groupId, Long userId, boolean inviteAccess) {
         Objects.requireNonNull(groupId, "groupId must not be null");
         Objects.requireNonNull(userId, "userId must not be null");
 
@@ -63,6 +73,13 @@ public class RoutineGroupJoinService {
                         RoutineGroupJoinException.Reason.GROUP_NOT_FOUND,
                         "routine group not found: " + groupId
                 ));
+        if (!inviteAccess && group.getVisibility() == GroupVisibility.PRIVATE) {
+            throw new RoutineGroupJoinException(
+                    RoutineGroupJoinException.Reason.PRIVATE_GROUP_REQUIRES_INVITE,
+                    "private routine group requires an invite: " + groupId
+            );
+        }
+
         if (!group.canAcceptNewMember()) {
             throw new RoutineGroupJoinException(
                     RoutineGroupJoinException.Reason.NOT_JOINABLE,

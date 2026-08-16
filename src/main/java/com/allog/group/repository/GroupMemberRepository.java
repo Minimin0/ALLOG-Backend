@@ -55,4 +55,6 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
             Collection<GroupMemberStatus> statuses,
             Pageable pageable
     );
+    long countByUser_IdAndStatus(Long userId, GroupMemberStatus status);
+
 }

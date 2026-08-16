@@ -72,7 +72,7 @@ public class RoutineGroupJoinController {
     ResponseEntity<Void> joinFailure(RoutineGroupJoinException exception) {
         HttpStatus status = switch (exception.reason()) {
             case GROUP_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case ALREADY_JOINED, NOT_JOINABLE, GROUP_FULL -> HttpStatus.CONFLICT;
+            case ALREADY_JOINED, NOT_JOINABLE, GROUP_FULL, PRIVATE_GROUP_REQUIRES_INVITE -> HttpStatus.CONFLICT;
         };
         return ResponseEntity.status(status).build();
     }

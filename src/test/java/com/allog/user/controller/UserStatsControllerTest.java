@@ -41,23 +41,23 @@ class UserStatsControllerTest {
     private UserStatsService statsService;
 
     @Test
-    void returnsHeartsAndRewardPoints() throws Exception {
-        when(statsService.read(USER_ID)).thenReturn(new UserStatsResponse(3, 40L));
+    void returnsHeartsRewardPointsAndSuccessfulRoutines() throws Exception {
+        when(statsService.read(USER_ID)).thenReturn(new UserStatsResponse(3, 40L, 2L));
 
         mockMvc.perform(authenticated(get(STATS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hearts").value(3))
-                .andExpect(jsonPath("$.rewardPoints").value(40));
+                .andExpect(jsonPath("$.rewardPoints").value(40))
+                .andExpect(jsonPath("$.successfulRoutines").value(2));
     }
 
-    /** Its meaning is agreed but nothing records it yet, so shipping a number would be a lie. */
     @Test
-    void doesNotReportSuccessfulRoutinesYet() throws Exception {
-        when(statsService.read(USER_ID)).thenReturn(new UserStatsResponse(3, 0L));
+    void reportsZeroSuccessfulRoutinesWhenNoMembershipCompleted() throws Exception {
+        when(statsService.read(USER_ID)).thenReturn(new UserStatsResponse(3, 0L, 0L));
 
         mockMvc.perform(authenticated(get(STATS)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.successfulRoutines").doesNotExist());
+                .andExpect(jsonPath("$.successfulRoutines").value(0));
     }
 
     @Test
