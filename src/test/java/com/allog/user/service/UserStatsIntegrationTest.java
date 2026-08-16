@@ -69,8 +69,8 @@ class UserStatsIntegrationTest {
         Long profileId = profileId(userId);
         assertEquals(1, walletRows(userId));
         assertEquals(GRANT, balance(userId));
-        assertTrue(ledgerRepository.existsByTypeAndSourceId(
-                HeartTransactionType.INITIAL_GRANT, profileId),
+        assertTrue(ledgerRepository.findByTypeAndSourceId(
+                HeartTransactionType.INITIAL_GRANT, profileId).isPresent(),
                 "the grant must be keyed to the profile that earned it");
         assertEquals(GRANT, statsService.read(userId).hearts());
     }

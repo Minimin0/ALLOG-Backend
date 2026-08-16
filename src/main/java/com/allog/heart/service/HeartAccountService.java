@@ -84,26 +84,33 @@ public class HeartAccountService {
     }
 
     /**
-     * Returns what a join cost. Refusing a refund with no matching spend is the point: without that
-     * check a repeated cancellation would mint hearts.
+     * Returns exactly what a join cost, to exactly whoever paid it.
+     *
+     * <p>The membership is the only argument on purpose. Who gets the hearts and how many are read
+     * back from the spend being reversed, so a caller cannot name a different member or a different
+     * amount - a refund is the inverse of one recorded debit, not a fresh credit.
+     *
+     * <p>The amount deliberately does not consult the current join price. If joining later costs two
+     * hearts, someone who paid one is still owed one.
      */
     @Transactional
-    public void refundGroupJoin(Long userId, Long groupMemberId, int amount) {
-        Objects.requireNonNull(userId, "userId must not be null");
+    public void refundGroupJoin(Long groupMemberId) {
         Objects.requireNonNull(groupMemberId, "groupMemberId must not be null");
-        requirePositive(amount);
-        requireWallet(userId);
 
-        if (!ledgerRepository.existsByTypeAndSourceId(
-                HeartTransactionType.GROUP_JOIN_SPEND, groupMemberId)) {
-            throw new InvalidHeartOperationException("cannot refund a join that was never charged");
+        HeartLedgerEntry originalSpend = ledgerRepository
+                .findByTypeAndSourceId(HeartTransactionType.GROUP_JOIN_SPEND, groupMemberId)
+                .orElseThrow(() -> new InvalidHeartOperationException(
+                        "cannot refund a join that was never charged"));
+
+        User payer = originalSpend.getUser();
+        int refunded = -originalSpend.getAmount();
+
+        // A credit that lands nowhere would leave the ledger claiming hearts the wallet never got.
+        if (walletRepository.increment(payer.getId(), refunded) == 0) {
+            throw new HeartWalletNotFoundException(payer.getId());
         }
-        walletRepository.increment(userId, amount);
         ledgerRepository.saveAndFlush(HeartLedgerEntry.record(
-                userRepository.getReferenceById(userId),
-                HeartTransactionType.GROUP_JOIN_REFUND,
-                amount,
-                groupMemberId));
+                payer, HeartTransactionType.GROUP_JOIN_REFUND, refunded, groupMemberId));
     }
 
     /**

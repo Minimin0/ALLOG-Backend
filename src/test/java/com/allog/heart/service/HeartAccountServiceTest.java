@@ -70,7 +70,7 @@ class HeartAccountServiceTest {
         heartAccountService.grantInitialHearts(userId, 11L);
 
         assertEquals(GRANT, heartAccountService.balanceOf(userId));
-        assertTrue(ledgerRepository.existsByTypeAndSourceId(HeartTransactionType.INITIAL_GRANT, 11L));
+        assertTrue(ledgerRepository.findByTypeAndSourceId(HeartTransactionType.INITIAL_GRANT, 11L).isPresent());
         assertReconciled(userId);
     }
 
@@ -126,7 +126,7 @@ class HeartAccountServiceTest {
         Long userId = granted(24L);
         heartAccountService.spendForGroupJoin(userId, 103L, 1);
 
-        heartAccountService.refundGroupJoin(userId, 103L, 1);
+        heartAccountService.refundGroupJoin(103L);
 
         assertEquals(GRANT, heartAccountService.balanceOf(userId));
         assertEquals(1, amountOf(HeartTransactionType.GROUP_JOIN_REFUND, 103L));
@@ -137,10 +137,10 @@ class HeartAccountServiceTest {
     void aJoinCannotBeRefundedTwice() {
         Long userId = granted(25L);
         heartAccountService.spendForGroupJoin(userId, 104L, 1);
-        heartAccountService.refundGroupJoin(userId, 104L, 1);
+        heartAccountService.refundGroupJoin(104L);
 
         assertThrows(DataIntegrityViolationException.class,
-                () -> heartAccountService.refundGroupJoin(userId, 104L, 1));
+                () -> heartAccountService.refundGroupJoin(104L));
 
         assertEquals(GRANT, heartAccountService.balanceOf(userId));
         assertReconciled(userId);
@@ -152,7 +152,7 @@ class HeartAccountServiceTest {
         Long userId = granted(26L);
 
         assertThrows(InvalidHeartOperationException.class,
-                () -> heartAccountService.refundGroupJoin(userId, 105L, 1));
+                () -> heartAccountService.refundGroupJoin(105L));
 
         assertEquals(GRANT, heartAccountService.balanceOf(userId));
         assertEquals(1, ledgerRows(userId));
@@ -176,8 +176,8 @@ class HeartAccountServiceTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> heartAccountService.spendForGroupJoin(userId, 107L, 0));
-        assertThrows(IllegalArgumentException.class,
-                () -> heartAccountService.refundGroupJoin(userId, 107L, -1));
+        assertThrows(NullPointerException.class,
+                () -> heartAccountService.refundGroupJoin(null));
     }
 
     /**
@@ -254,5 +254,60 @@ class HeartAccountServiceTest {
                 Integer.class, userId);
         assertEquals(summed, heartAccountService.balanceOf(userId),
                 "wallet balance must equal the sum of its ledger");
+    }
+
+    /**
+     * The refund is the inverse of the spend, so a two-heart join returns two - not the one-heart
+     * price the join policy happens to charge today.
+     */
+    @Test
+    void refundReturnsWhatWasActuallyPaidNotTheCurrentPrice() {
+        Long userId = granted(31L);
+        heartAccountService.spendForGroupJoin(userId, 301L, 2);
+
+        heartAccountService.refundGroupJoin(301L);
+
+        assertEquals(2, amountOf(HeartTransactionType.GROUP_JOIN_REFUND, 301L));
+        assertEquals(GRANT, heartAccountService.balanceOf(userId), "the wallet is exactly restored");
+        assertReconciled(userId);
+    }
+
+    /**
+     * The payer is read back from the spend, so there is no argument through which one member's
+     * cancellation could credit another. The signature is the guarantee.
+     */
+    @Test
+    void refundCreditsWhoeverActuallyPaid() {
+        Long payer = granted(32L);
+        Long bystander = granted(33L);
+        heartAccountService.spendForGroupJoin(payer, 302L, 1);
+
+        heartAccountService.refundGroupJoin(302L);
+
+        assertEquals(GRANT, heartAccountService.balanceOf(payer));
+        assertEquals(GRANT, heartAccountService.balanceOf(bystander), "an unrelated member is untouched");
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM heart_ledger_entry WHERE user_id = ? AND type = 'GROUP_JOIN_REFUND'",
+                Integer.class, bystander));
+        assertReconciled(payer);
+        assertReconciled(bystander);
+    }
+
+    @Test
+    void aFailedSecondRefundLeavesTheWalletWhereItWas() {
+        Long userId = granted(34L);
+        heartAccountService.spendForGroupJoin(userId, 303L, 1);
+        heartAccountService.refundGroupJoin(303L);
+        int afterFirstRefund = heartAccountService.balanceOf(userId);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> heartAccountService.refundGroupJoin(303L));
+
+        assertEquals(afterFirstRefund, heartAccountService.balanceOf(userId),
+                "the rejected credit must roll back with its ledger row");
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM heart_ledger_entry WHERE type = 'GROUP_JOIN_REFUND' AND source_id = 303",
+                Integer.class));
+        assertReconciled(userId);
     }
 }
