@@ -66,3 +66,6 @@ MON/WED/FRI
 scheduler는 candidate ID 검색과 group별 delegation만 수행하고, 각 group은 별도 transaction에서 schedule-authoritative expiry, FULL activation, 또는 finalization을 처리한다. terminal 상태의 재처리는 no-op이며 읽기 endpoint는 lifecycle을 변경하지 않는다.
 
 M3-L finalization은 Heart와 Reward를 변경하지 않는다. Heart spend/refund, Reward policy, ranking, `successfulRoutines` 노출은 후속 milestone의 별도 product·domain 계약이다.
+
+## Known Debt: Verification Invalidation
+Verification has an APPROVED-to-INVALIDATED domain transition, but no production invalidation flow is currently connected. Before connecting invalidation to production, define a reconciliation policy for persisted GroupMember COMPLETED/FAILED outcomes and RoutineGroup COMPLETED. M3-L does not automatically reverse terminal completion; this change does not implement an invalidation policy.

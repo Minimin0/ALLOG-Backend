@@ -8,8 +8,7 @@ import java.time.Duration;
  * How often the lifecycle sweep runs and how much it takes at a time. Operational settings, not
  * product rules: no group behaviour changes if these are tuned.
  *
- * <p>{@code enabled} is off by default so tests never race a background sweep; deployments turn it
- * on.
+ * <p>{@code enabled} defaults to true for ordinary runtime reconciliation; the test profile disables it.
  */
 @ConfigurationProperties("allog.group.lifecycle")
 public record RoutineGroupLifecycleProperties(
