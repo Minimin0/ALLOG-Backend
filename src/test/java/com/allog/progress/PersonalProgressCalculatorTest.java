@@ -352,14 +352,22 @@ class PersonalProgressCalculatorTest {
         assertEquals(1, facts.remainingOpportunityCount());
     }
 
+    /** The ball is in the member's court, so the opportunity stays open until its deadline passes. */
     @Test
-    void retryRequiredFailsFastInsteadOfAppearingOpen() {
-        Fixture fixture = daily("2026-08-01", "2026-08-02", 2);
+    void retryRequiredStaysOpenUntilTheDeadlineThenFails() {
+        Fixture fixture = daily("2026-08-02", "2026-08-02", 1);
         Verification retry = verification(fixture, "2026-08-02", VerificationStatus.RETRY_REQUIRED);
 
-        assertThrows(
-                IllegalStateException.class,
-                () -> calculate(fixture, List.of(retry), "2026-08-02T10:00:00Z")
+        PersonalProgressFacts before = calculate(fixture, List.of(retry), "2026-08-02T10:00:00Z");
+        PersonalProgressFacts after = calculate(fixture, List.of(retry), "2026-08-02T14:00:00Z");
+
+        assertAll(
+                () -> assertEquals(1, before.remainingOpportunityCount()),
+                () -> assertEquals(0, before.pendingDecisionCount()),
+                () -> assertFalse(before.todayVerificationPending()),
+                () -> assertFalse(before.todayCompleted()),
+                () -> assertEquals(0, after.remainingOpportunityCount()),
+                () -> assertEquals(0, after.completedCount())
         );
     }
 
@@ -505,7 +513,7 @@ class PersonalProgressCalculatorTest {
             case REJECTED -> {
                 verification.submit(TRANSITION_CLOCK);
                 verification.startProcessing();
-                verification.reject();
+                verification.rejectByOperator(TRANSITION_CLOCK, 99L, "operator note");
             }
             case INVALIDATED -> {
                 verification.submit(TRANSITION_CLOCK);

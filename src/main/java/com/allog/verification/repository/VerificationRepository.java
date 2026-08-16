@@ -5,6 +5,7 @@ import com.allog.routine.domain.RoutineSchedule;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -41,6 +42,45 @@ public interface VerificationRepository extends JpaRepository<Verification, Long
             @Param("groupMemberId") Long groupMemberId,
             @Param("routineScheduleId") Long routineScheduleId,
             @Param("scheduledDate") LocalDate scheduledDate
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select verification from Verification verification where verification.id = :verificationId")
+    Optional<Verification> findByIdForUpdate(@Param("verificationId") Long verificationId);
+
+    /**
+     * The review queue. Oldest first, so the member who has been waiting longest is settled first.
+     * Media and analysis are joined in rather than fetched per row: a queue read must not turn into
+     * two extra queries per held verification.
+     */
+    @Query("""
+            select new com.allog.verification.repository.PendingReviewRow(
+                verification.id,
+                member.user.id,
+                group.id,
+                verification.scheduledDate,
+                verification.attemptCount,
+                verification.createdAt,
+                verification.submittedAt,
+                media.objectKey,
+                analysis.recommendation,
+                analysis.reasonCode,
+                analysis.objectPresence,
+                analysis.anomalyDetected,
+                analysis.criteriaVersion
+            )
+            from Verification verification
+            join verification.groupMember member
+            join verification.routineSchedule schedule
+            join schedule.routineGroup group
+            left join VerificationMedia media on media.verification = verification
+            left join VerificationAnalysis analysis on analysis.verification = verification
+            where verification.status = :status
+            order by verification.createdAt asc, verification.id asc
+            """)
+    List<PendingReviewRow> findReviewQueue(
+            @Param("status") VerificationStatus status,
+            Pageable pageable
     );
 
     List<Verification> findAllByGroupMember_IdAndRoutineSchedule_IdAndStatusAndScheduledDateBetweenOrderByScheduledDateAsc(

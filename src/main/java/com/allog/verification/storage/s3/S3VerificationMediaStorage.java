@@ -3,6 +3,7 @@ package com.allog.verification.storage.s3;
 import com.allog.verification.storage.VerificationMediaStorage;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -11,6 +12,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -153,6 +155,60 @@ public final class S3VerificationMediaStorage implements VerificationMediaStorag
             }
             throw configuration("verification media storage request was rejected", exception);
         } catch (SdkClientException | IOException exception) {
+            throw unavailable("verification media storage is unavailable", exception);
+        }
+    }
+
+    @Override
+    public URI issueDownload(String objectKey, Instant expiresAt) {
+        Duration signatureDuration = Duration.between(clock.instant(), Objects.requireNonNull(expiresAt));
+        if (signatureDuration.isZero() || signatureDuration.isNegative()) {
+            throw new StorageException(
+                    StorageException.Reason.CONFIGURATION,
+                    "verification media download expiry must be in the future"
+            );
+        }
+        try {
+            return URI.create(presigner.presignGetObject(GetObjectPresignRequest.builder()
+                            .signatureDuration(signatureDuration)
+                            .getObjectRequest(GetObjectRequest.builder()
+                                    .bucket(bucket)
+                                    .key(requireText(objectKey, "objectKey"))
+                                    .build())
+                            .build())
+                    .url()
+                    .toString());
+        } catch (SdkClientException exception) {
+            throw unavailable("verification media download link could not be generated", exception);
+        } catch (RuntimeException exception) {
+            throw configuration("verification media download link configuration is invalid", exception);
+        }
+    }
+
+    @Override
+    public void overwrite(String objectKey, String contentType, byte[] content) {
+        String expectedObjectKey = requireText(objectKey, "objectKey");
+        String expectedContentType = requireText(contentType, "contentType");
+        Objects.requireNonNull(content, "content must not be null");
+        if (content.length == 0) {
+            throw new IllegalArgumentException("content must not be empty");
+        }
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(expectedObjectKey)
+                            .contentType(expectedContentType)
+                            .contentLength((long) content.length)
+                            .build(),
+                    RequestBody.fromBytes(content)
+            );
+        } catch (S3Exception exception) {
+            if (exception.statusCode() >= 500) {
+                throw unavailable("verification media storage is unavailable", exception);
+            }
+            throw configuration("verification media storage request was rejected", exception);
+        } catch (SdkClientException exception) {
             throw unavailable("verification media storage is unavailable", exception);
         }
     }

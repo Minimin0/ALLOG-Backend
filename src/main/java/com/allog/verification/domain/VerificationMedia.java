@@ -86,8 +86,9 @@ public class VerificationMedia extends BaseTimeEntity {
         if (actualSizeBytes <= 0) {
             throw new IllegalArgumentException("actualSizeBytes must be positive");
         }
-        if (actualSizeBytes != expectedSizeBytes) {
-            throw new IllegalStateException("confirmed media size must equal expected size");
+        // Upper bound, not equality: in-place EXIF sanitization only ever removes bytes from the object.
+        if (actualSizeBytes > expectedSizeBytes) {
+            throw new IllegalStateException("confirmed media size must not exceed expected size");
         }
         Instant confirmationTime = Objects.requireNonNull(
                 Objects.requireNonNull(clock, "clock must not be null").instant(),
@@ -101,6 +102,24 @@ public class VerificationMedia extends BaseTimeEntity {
         }
         confirmedSizeBytes = actualSizeBytes;
         confirmedAt = confirmationTime;
+    }
+
+    /**
+     * Points this binding at the photo the guided retry will upload. The previous object stays in
+     * storage under its own key; nothing here can be confirmed twice against the same bytes.
+     */
+    public void rearmForRetry(String objectKey, String contentType, long expectedSizeBytes) {
+        if (!isConfirmed()) {
+            throw new IllegalStateException("only confirmed media can be re-armed for a retry");
+        }
+        if (expectedSizeBytes <= 0) {
+            throw new IllegalArgumentException("expectedSizeBytes must be positive");
+        }
+        this.objectKey = requireText(objectKey, "objectKey");
+        this.contentType = requireText(contentType, "contentType");
+        this.expectedSizeBytes = expectedSizeBytes;
+        this.confirmedSizeBytes = null;
+        this.confirmedAt = null;
     }
 
     public Long getId() {

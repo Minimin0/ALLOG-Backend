@@ -76,7 +76,7 @@ public class VerificationAnalysisInputLoader {
         if (!mediaProperties.enabled()
                 || confirmedSize == null
                 || confirmedSize <= 0
-                || confirmedSize != media.getExpectedSizeBytes()
+                || confirmedSize > media.getExpectedSizeBytes()
                 || confirmedSize > mediaProperties.maxBytes()
                 || confirmedSize >= Integer.MAX_VALUE
                 || !mediaProperties.allowedContentTypes().contains(contentType)) {

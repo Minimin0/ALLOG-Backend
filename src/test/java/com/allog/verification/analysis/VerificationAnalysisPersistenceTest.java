@@ -30,6 +30,7 @@ import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult
 import com.allog.verification.analysis.service.VerificationAnalysisWorker;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
+import com.allog.verification.media.TestPhotos;
 import com.allog.verification.storage.VerificationMediaProperties;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
@@ -80,7 +81,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest(properties = "allog.verification.analysis.processing-timeout=PT5M")
+@SpringBootTest(properties = {
+        // 이 클래스는 fixture(verification/user/group)를 commit한 채 남기므로 전용 DB를 쓴다.
+        // 공유 allog-test DB에 두면 전역 row count를 단언하는 다른 테스트가 실행 순서에 따라 깨진다.
+        "spring.datasource.url=${ANALYSIS_TEST_DB_URL:jdbc:h2:mem:verification-analysis;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1}",
+        "spring.datasource.username=${ANALYSIS_TEST_DB_USERNAME:sa}",
+        "spring.datasource.password=${ANALYSIS_TEST_DB_PASSWORD:}",
+        "spring.datasource.driver-class-name=${ANALYSIS_TEST_DB_DRIVER:org.h2.Driver}",
+        "allog.verification.analysis.processing-timeout=PT5M"
+})
 @ActiveProfiles("test")
 class VerificationAnalysisPersistenceTest {
 
@@ -88,6 +97,8 @@ class VerificationAnalysisPersistenceTest {
     private static final Instant COMPLETED_AT = Instant.parse("2026-08-11T10:01:00Z");
     private static final Instant WORKER_NOW = Instant.parse("2026-08-14T00:00:00Z");
     private static final RoutineKey TEST_ROUTINE_KEY = new RoutineKey("TEST_ROUTINE");
+    /** Provider-bound media must survive EXIF/GPS sanitization, so it has to be a real image. */
+    private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
 
     @Autowired
     private VerificationAnalysisRepository repository;
@@ -302,14 +313,14 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void flywayAppliedExactlyV1ThroughV8() {
+    void flywayAppliedExactlyV1ThroughV12() {
         assertAll(
-                () -> assertEquals(8, jdbcTemplate.queryForObject(
+                () -> assertEquals(12, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '8' and success = true",
+                        "select count(*) from flyway_schema_history where version = '12' and success = true",
                         Integer.class
                 ))
         );
@@ -535,11 +546,124 @@ class VerificationAnalysisPersistenceTest {
                 () -> assertEquals(VerificationAnalysisStatus.FAILED, analysis.getStatus()),
                 () -> assertEquals(VerificationAnalysisFailureCode.TIMEOUT, analysis.getFailureCode()),
                 () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals("SUBMITTED", verificationStatus(claim.analysisId())),
                 () -> assertEquals(WORKER_NOW.plusSeconds(30), analysis.getCompletedAt()),
                 () -> assertEquals(1, analysis.getAttemptCount()),
                 () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt()),
                 () -> assertEquals(1, clock.reads()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        );
+    }
+
+    @Test
+    void passRecommendationApprovesVerificationInTheSameTransaction() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.PASS)));
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(claim.analysisId()))
+        );
+    }
+
+    @Test
+    void firstRejectionSendsTheVerificationBackForOneRetry() {
+        VerificationAnalysisClaim rejectClaim = claimPendingAnalysis();
+        VerificationAnalysisClaim reviewClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertTrue(resultService.completeSuccess(
+                rejectClaim,
+                successResult(AnalysisRecommendation.REJECT_CANDIDATE)
+        ));
+        assertTrue(resultService.completeSuccess(
+                reviewClaim,
+                successResult(AnalysisRecommendation.REVIEW_REQUIRED)
+        ));
+
+        assertAll(
+                () -> assertEquals(
+                        AnalysisRecommendation.REJECT_CANDIDATE,
+                        repository.findById(rejectClaim.analysisId()).orElseThrow().getRecommendation()
+                ),
+                () -> assertEquals(
+                        AnalysisRecommendation.REVIEW_REQUIRED,
+                        repository.findById(reviewClaim.analysisId()).orElseThrow().getRecommendation()
+                ),
+                () -> assertEquals("RETRY_REQUIRED", verificationStatus(rejectClaim.analysisId())),
+                // a REVIEW_REQUIRED recommendation is not a rejection, so it spends no retry
+                () -> assertEquals("SUBMITTED", verificationStatus(reviewClaim.analysisId()))
+        );
+    }
+
+    /** The second rejection is where the guided retry ends and a person has to look at it instead. */
+    @Test
+    void aRejectionAfterTheRetryIsHeldForReviewInsteadOfLooping() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+        assertEquals("RETRY_REQUIRED", verificationStatus(claim.analysisId()));
+
+        VerificationAnalysisClaim retryClaim = resubmitAndClaim(claim.analysisId());
+        assertTrue(resultService.completeSuccess(retryClaim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+
+        assertAll(
+                () -> assertEquals("REVIEW_REQUIRED", verificationStatus(claim.analysisId())),
+                () -> assertEquals(2, verificationAttemptCount(claim.analysisId()))
+        );
+    }
+
+    @Test
+    void aPassAfterTheRetryApprovesTheVerification() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+        assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.REJECT_CANDIDATE)));
+
+        VerificationAnalysisClaim retryClaim = resubmitAndClaim(claim.analysisId());
+        assertTrue(resultService.completeSuccess(retryClaim, successResult(AnalysisRecommendation.PASS)));
+
+        assertAll(
+                () -> assertEquals("APPROVED", verificationStatus(claim.analysisId())),
+                () -> assertEquals(2, verificationAttemptCount(claim.analysisId())),
+                () -> assertEquals(
+                        AnalysisRecommendation.PASS,
+                        repository.findById(claim.analysisId()).orElseThrow().getRecommendation()
+                )
+        );
+    }
+
+    @Test
+    void stalePassResultNeverApprovesVerification() {
+        VerificationAnalysisClaim oldClaim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(300));
+        assertTrue(claimService.recoverNextStaleProcessing());
+        claimService.claimNextPending().orElseThrow();
+        clock.set(WORKER_NOW.plusSeconds(330));
+
+        assertFalse(resultService.completeSuccess(oldClaim, successResult(AnalysisRecommendation.PASS)));
+
+        assertEquals("SUBMITTED", verificationStatus(oldClaim.analysisId()));
+    }
+
+    @Test
+    void passApprovalRollsBackTogetherWithAnalysisSuccess() {
+        VerificationAnalysisClaim claim = claimPendingAnalysis();
+        clock.set(WORKER_NOW.plusSeconds(30));
+
+        assertThrows(TestRollback.class, () -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            assertTrue(resultService.completeSuccess(claim, successResult(AnalysisRecommendation.PASS)));
+            throw new TestRollback();
+        }));
+
+        VerificationAnalysis analysis = repository.findById(claim.analysisId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationAnalysisStatus.PROCESSING, analysis.getStatus()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals("SUBMITTED", verificationStatus(claim.analysisId()))
         );
     }
 
@@ -749,7 +873,7 @@ class VerificationAnalysisPersistenceTest {
     }
 
     @Test
-    void workerPersistsSyntheticSuccessWithFiveStatementsAndTransactionSeparation() {
+    void workerPersistsSyntheticPassSuccessWithApprovalAndTransactionSeparation() {
         Long analysisId = pendingAnalysisId();
         AtomicBoolean processorTransaction = new AtomicBoolean(true);
         VerificationAnalysisWorker worker = worker(claim -> {
@@ -774,13 +898,17 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, executionResult),
-                () -> assertEquals(5, statements),
+                // 5 -> 7: PASS 승인이 같은 transaction에서 verification을 select + update 한다.
+                // 7 -> 9: 보상 지급이 중복 확인 select + reward insert를 더한다.
+                () -> assertEquals(9, statements),
                 () -> assertFalse(processorTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                () -> assertEquals(2, clock.reads()),
-                () -> assertEquals(2, clock.transactionalReads()),
+                // approve(clock)의 approvedAt, 그리고 보상의 grantedAt 때문에 clock을 두 번 더 읽는다.
+                () -> assertEquals(4, clock.reads()),
+                () -> assertEquals(4, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
                 () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(analysisId)),
                 () -> assertEquals(WORKER_NOW, analysis.getCompletedAt()),
                 () -> assertEquals(1, analysis.getAttemptCount()),
                 () -> assertEquals(WORKER_NOW, analysis.getLastAttemptAt())
@@ -1043,13 +1171,13 @@ class VerificationAnalysisPersistenceTest {
 
     @Test
     void backendDecisionCanCombineMediaObservationAndCompleteWorkerWithoutExternalTransaction() {
-        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", PHOTO.length, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
-                4,
+                PHOTO.length,
                 "image/jpeg",
-                new byte[]{1, 2, 3, 4}
+                PHOTO
         ));
         AtomicBoolean providerTransaction = new AtomicBoolean(true);
         VerificationAnalysisProvider provider = (criteria, evidence) -> {
@@ -1081,26 +1209,29 @@ class VerificationAnalysisPersistenceTest {
         VerificationAnalysis analysis = repository.findById(analysisId).orElseThrow();
         assertAll(
                 () -> assertEquals(VerificationAnalysisWorker.ExecutionResult.COMPLETED, result),
-                () -> assertEquals(7, statements),
+                // PASS 승인이 verification을 select + update 하고, 보상 지급이 select + insert를 더한다.
+                () -> assertEquals(11, statements),
                 () -> assertFalse(storage.transactionActive()),
                 () -> assertFalse(providerTransaction.get()),
                 () -> assertFalse(TransactionSynchronizationManager.isActualTransactionActive()),
-                () -> assertEquals(2, clock.reads()),
-                () -> assertEquals(2, clock.transactionalReads()),
+                // approvedAt과 grantedAt 때문에 clock을 두 번 더 읽는다.
+                () -> assertEquals(4, clock.reads()),
+                () -> assertEquals(4, clock.transactionalReads()),
                 () -> assertEquals(VerificationAnalysisStatus.SUCCEEDED, analysis.getStatus()),
-                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation())
+                () -> assertEquals(AnalysisRecommendation.PASS, analysis.getRecommendation()),
+                () -> assertEquals("APPROVED", verificationStatus(analysisId))
         );
     }
 
     @Test
     void staleMediaProcessorResultCannotOverwriteCurrentAttempt() throws Exception {
-        Long analysisId = pendingAnalysisWithMedia("image/jpeg", 4, true);
+        Long analysisId = pendingAnalysisWithMedia("image/jpeg", PHOTO.length, true);
         String objectKey = analysisObjectKey(analysisId);
         TrackingAcquisitionStorage storage = new TrackingAcquisitionStorage(new VerificationMediaStorage.StoredMedia(
                 objectKey,
-                4,
+                PHOTO.length,
                 "image/jpeg",
-                new byte[]{1, 2, 3, 4}
+                PHOTO
         ));
         CountDownLatch providerStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -1217,6 +1348,32 @@ class VerificationAnalysisPersistenceTest {
                 .orElseThrow();
     }
 
+    /** Replays what the member's guided retry does: submit again, then re-queue the same analysis. */
+    private VerificationAnalysisClaim resubmitAndClaim(Long analysisId) {
+        inTransaction(() -> {
+            VerificationAnalysis analysis = repository.findByIdWithVerification(analysisId).orElseThrow();
+            analysis.getVerification().submit(Clock.fixed(clock.instant(), ZoneOffset.UTC));
+            analysis.rearmForRetry(UUID.randomUUID());
+            return null;
+        });
+        return claimService.claimNextPending()
+                .filter(claim -> claim.analysisId().equals(analysisId))
+                .orElseThrow();
+    }
+
+    private int verificationAttemptCount(Long analysisId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        select verification.attempt_count
+                        from verification
+                        join verification_analysis analysis on analysis.verification_id = verification.id
+                        where analysis.id = ?
+                        """,
+                Integer.class,
+                analysisId
+        );
+    }
+
     private VerificationAnalysisWorker worker(VerificationAnalysisProcessor processor) {
         return new VerificationAnalysisWorker(claimService, resultService, Optional.of(processor));
     }
@@ -1286,6 +1443,19 @@ class VerificationAnalysisPersistenceTest {
                         true,
                         VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
                 )
+        );
+    }
+
+    private String verificationStatus(Long analysisId) {
+        return jdbcTemplate.queryForObject(
+                """
+                        select verification.status
+                        from verification
+                        join verification_analysis analysis on analysis.verification_id = verification.id
+                        where analysis.id = ?
+                        """,
+                String.class,
+                analysisId
         );
     }
 

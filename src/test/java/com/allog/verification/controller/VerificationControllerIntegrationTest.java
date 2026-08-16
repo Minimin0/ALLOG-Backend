@@ -275,7 +275,7 @@ class VerificationControllerIntegrationTest {
     }
 
     @Test
-    void duplicateSubmitPreservesApprovedStatusAndRetryRemainsDisabled() throws Exception {
+    void duplicateSubmitPreservesApprovedStatusAndRetryReopensUpload() throws Exception {
         Fixture approvedFixture = fixture(GroupVisibility.PUBLIC, GroupMemberStatus.ACTIVE);
         mockMvc.perform(validUpload(approvedFixture, "video/mp4", 123)).andExpect(status().isOk());
         mockMvc.perform(authenticatedPost(
@@ -311,15 +311,12 @@ class VerificationControllerIntegrationTest {
             return null;
         });
 
-        mockMvc.perform(validUpload(retryFixture, "video/mp4", 123))
-                .andExpect(status().isConflict())
-                .andExpect(content().string(""));
-        mockMvc.perform(authenticatedPost(
-                        currentEndpoint(retryFixture.groupId()) + "/submit",
-                        retryFixture.userId()
-                ))
-                .andExpect(status().isConflict())
-                .andExpect(content().string(""));
+        // the guided retry reopens the upload that used to be refused with a conflict
+        mockMvc.perform(validUpload(retryFixture, "video/mp4", 123)).andExpect(status().isOk());
+        assertEquals(
+                VerificationStatus.RETRY_REQUIRED,
+                currentVerification(retryFixture).getStatus()
+        );
     }
 
     private void expectAllCommands(Fixture fixture, Long requesterId, int expectedStatus) throws Exception {

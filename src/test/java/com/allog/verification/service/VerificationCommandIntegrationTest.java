@@ -10,14 +10,25 @@ import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
 import com.allog.routine.domain.ScheduleType;
 import com.allog.user.domain.User;
+import com.allog.reward.domain.VerificationReward;
+import com.allog.reward.repository.VerificationRewardRepository;
+import com.allog.reward.service.VerificationRewardService;
+import com.allog.verification.analysis.domain.AnalysisRecommendation;
+import com.allog.verification.analysis.domain.VerificationAnalysis;
+import com.allog.verification.analysis.domain.VerificationAnalysisObservation;
 import com.allog.verification.analysis.domain.VerificationAnalysisStatus;
 import com.allog.verification.analysis.repository.VerificationAnalysisRepository;
 import com.allog.verification.analysis.service.AnalysisRequestIdGenerator;
+import com.allog.verification.analysis.service.VerificationAnalysisClaim;
+import com.allog.verification.analysis.service.VerificationAnalysisProvider;
+import com.allog.verification.analysis.service.VerificationAnalysisResultService;
+import com.allog.verification.analysis.service.VerificationAnalysisSuccessResult;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationMedia;
 import com.allog.verification.domain.VerificationStatus;
 import com.allog.verification.repository.VerificationMediaRepository;
 import com.allog.verification.repository.VerificationRepository;
+import com.allog.verification.media.TestPhotos;
 import com.allog.verification.storage.VerificationMediaStorage;
 import com.allog.verification.template.VerificationTemplateCatalog;
 import jakarta.persistence.EntityManager;
@@ -36,6 +47,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -59,8 +71,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,6 +98,10 @@ class VerificationCommandIntegrationTest {
 
     private static final Instant SNAPSHOT_NOW = Instant.parse("2026-08-11T10:00:00Z");
     private static final Instant DEADLINE = Instant.parse("2026-08-11T14:00:00Z");
+    private static final byte[] GPS_TAGS = "GPSLatitude=37.5665".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+    /** Photo submissions are sanitized in place, so the fixture has to be a real image. */
+    private static final byte[] PHOTO = TestPhotos.jpeg(4, 4);
+    private static final Long OPERATOR_ID = 99L;
 
     @Autowired
     private VerificationCommandService service;
@@ -122,6 +141,18 @@ class VerificationCommandIntegrationTest {
 
     @Autowired
     private VerificationTemplateCatalog verificationTemplateCatalog;
+
+    @Autowired
+    private VerificationAnalysisResultService analysisResultService;
+
+    @Autowired
+    private VerificationReviewService reviewService;
+
+    @Autowired
+    private VerificationRewardRepository rewardRepository;
+
+    @Autowired
+    private VerificationRewardService rewardService;
 
     @BeforeEach
     void resetMediaBoundary() {
@@ -193,14 +224,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV8() {
+    void flywayHasExactlyV1ThroughV12() {
         assertAll(
-                () -> assertEquals(8, jdbcTemplate.queryForObject(
+                () -> assertEquals(12, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '8'",
+                        "select count(*) from flyway_schema_history where version = '12'",
                         Integer.class
                 ))
         );
@@ -348,7 +379,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void pilotBoundSubmitPinsExactV1ProvenanceAndIsIdempotent() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
 
         VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
                 fixture.groupId(), fixture.userId()
@@ -374,7 +405,7 @@ class VerificationCommandIntegrationTest {
     void concurrentPilotBoundSubmitCreatesOneAnalysisWithOneExactProvenance() throws Exception {
         Fixture fixture = fixture(true);
         service.createOrGetCurrent(fixture.groupId(), fixture.userId());
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
 
         List<Instant> submittedAt = concurrently(() -> mediaSubmissionService.submitCurrent(
                 fixture.groupId(), fixture.userId()
@@ -410,7 +441,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void unknownTemplateRollsBackSubmissionAtomically() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         jdbcTemplate.update(
                 "update routine_group set verification_template_key = 'UNKNOWN_TEMPLATE' where id = ?",
                 fixture.groupId()
@@ -426,7 +457,7 @@ class VerificationCommandIntegrationTest {
     @Test
     void templateCriteriaMismatchRollsBackSubmissionAtomically() {
         Fixture fixture = fixture(true);
-        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", 100);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
         jdbcTemplate.update(
                 "update routine_group set verification_criteria_reference = 'other-criteria@1' where id = ?",
                 fixture.groupId()
@@ -463,6 +494,361 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
+    void guidedRetryIssuesAFreshUploadAndRequeuesTheSameAnalysis() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult first = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+        String firstKey = mediaStorage.issuedKeys().getLast();
+        UUID firstRequestId = verificationAnalysisRepository
+                .findByVerification_Id(first.verificationId()).orElseThrow().getAnalysisRequestId();
+
+        completeCurrentAnalysis(first.verificationId(), AnalysisRecommendation.REJECT_CANDIDATE);
+        assertEquals(VerificationStatus.RETRY_REQUIRED, currentVerification(fixture).getStatus());
+
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult second = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+
+        Verification verification = currentVerification(fixture);
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(second.verificationId()).orElseThrow();
+        VerificationAnalysis analysis = verificationAnalysisRepository
+                .findByVerification_Id(second.verificationId()).orElseThrow();
+        assertAll(
+                () -> assertEquals(first.verificationId(), second.verificationId()),
+                () -> assertEquals(VerificationStatus.SUBMITTED, verification.getStatus()),
+                () -> assertEquals(2, verification.getAttemptCount()),
+                () -> assertFalse(verification.hasRetryRemaining()),
+                // the retry uploads a different photo, so the binding moved to a new key
+                () -> assertNotEquals(firstKey, media.getObjectKey()),
+                () -> assertTrue(media.isConfirmed()),
+                // one analysis row, re-queued under a new request id, judged against the same criteria
+                () -> assertEquals(1, analysisRows(second.verificationId())),
+                () -> assertEquals(VerificationAnalysisStatus.PENDING, analysis.getStatus()),
+                () -> assertNotEquals(firstRequestId, analysis.getAnalysisRequestId()),
+                () -> assertNull(analysis.getRecommendation()),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        analysis.getCriteriaVersion()
+                )
+        );
+    }
+
+    @Test
+    void submitWithoutAFreshUploadIsRefusedWhileRetryIsPending() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        completeCurrentAnalysis(submitted.verificationId(), AnalysisRecommendation.REJECT_CANDIDATE);
+
+        assertThrows(
+                VerificationCommandConflictException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+    }
+
+    @Test
+    void operatorApprovesAVerificationTheAiHeldAndItCountsAsProgress() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+
+        Verification approved = reviewService.approve(verificationId, OPERATOR_ID);
+
+        Verification stored = verificationRepository.findById(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, approved.getStatus()),
+                () -> assertTrue(approved.getStatus().countsAsProgress()),
+                () -> assertNotNull(approved.getApprovedAt()),
+                () -> assertEquals(VerificationStatus.APPROVED, stored.getStatus()),
+                // the reward this unlocks has to be able to name the person behind it
+                () -> assertEquals(OPERATOR_ID, stored.getReviewedBy()),
+                () -> assertEquals(SNAPSHOT_NOW, stored.getReviewedAt())
+        );
+    }
+
+    @Test
+    void operatorRejectsWithAReasonThatSurvivesTheTransaction() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+
+        reviewService.reject(verificationId, OPERATOR_ID, "food is not visible in the photo");
+
+        Verification rejected = verificationRepository.findById(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.REJECTED, rejected.getStatus()),
+                () -> assertEquals("food is not visible in the photo", rejected.getReviewNote()),
+                () -> assertFalse(rejected.getStatus().countsAsProgress()),
+                () -> assertEquals(OPERATOR_ID, rejected.getReviewedBy()),
+                () -> assertEquals(SNAPSHOT_NOW, rejected.getReviewedAt())
+        );
+    }
+
+    /** An AI approval is nobody's manual decision, so the audit columns must stay empty. */
+    @Test
+    void anAiApprovalLeavesTheOperatorAuditEmpty() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.PASS);
+
+        Verification approved = verificationRepository.findById(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, approved.getStatus()),
+                () -> assertNotNull(approved.getApprovedAt()),
+                () -> assertNull(approved.getReviewedBy()),
+                () -> assertNull(approved.getReviewedAt()),
+                () -> assertNull(approved.getReviewNote())
+        );
+    }
+
+    @Test
+    void anAlreadySettledVerificationCannotBeSettledAgain() {
+        Fixture fixture = fixture(true);
+        Long verificationId = heldForReview(fixture);
+        reviewService.approve(verificationId, OPERATOR_ID);
+
+        assertAll(
+                () -> assertThrows(
+                        VerificationCommandConflictException.class,
+                        () -> reviewService.approve(verificationId, OPERATOR_ID)
+                ),
+                () -> assertThrows(
+                        VerificationCommandConflictException.class,
+                        () -> reviewService.reject(verificationId, OPERATOR_ID, "changed my mind")
+                ),
+                () -> assertEquals(
+                        VerificationStatus.APPROVED,
+                        verificationRepository.findById(verificationId).orElseThrow().getStatus()
+                )
+        );
+    }
+
+    @Test
+    void reviewQueueReturnsOnlyHeldVerificationsOldestFirstWithTheirEvidence() {
+        Long older = heldForReview(fixture(true));
+        Long newer = heldForReview(fixture(true));
+        // settled and in-flight verifications must not appear in the queue
+        Long approved = heldForReview(fixture(true));
+        reviewService.approve(approved, OPERATOR_ID);
+        Fixture submittedOnly = fixture(true);
+        mediaUploadService.issueCurrentUpload(
+                submittedOnly.groupId(), submittedOnly.userId(), "image/jpeg", PHOTO.length
+        );
+        Long submitted = mediaSubmissionService
+                .submitCurrent(submittedOnly.groupId(), submittedOnly.userId())
+                .verificationId();
+
+        List<PendingReview> queue = reviewService.reviewQueue();
+
+        List<Long> queuedIds = queue.stream().map(PendingReview::verificationId).toList();
+        PendingReview held = queue.stream()
+                .filter(item -> item.verificationId().equals(older))
+                .findFirst()
+                .orElseThrow();
+        assertAll(
+                () -> assertTrue(queuedIds.containsAll(List.of(older, newer))),
+                () -> assertTrue(queuedIds.indexOf(older) < queuedIds.indexOf(newer), "oldest first"),
+                () -> assertFalse(queuedIds.contains(approved)),
+                () -> assertFalse(queuedIds.contains(submitted)),
+                // the operator gets the AI's own feedback plus something they can actually open
+                () -> assertEquals(AnalysisRecommendation.REJECT_CANDIDATE, held.recommendation()),
+                () -> assertEquals("OBSERVATION_COMPLETE", held.reasonCode()),
+                () -> assertEquals(false, held.objectPresence()),
+                () -> assertEquals(
+                        VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1.storageValue(),
+                        held.criteriaVersion()
+                ),
+                () -> assertEquals(2, held.attemptCount()),
+                () -> assertNotNull(held.mediaUrl()),
+                () -> assertNotNull(held.userId()),
+                () -> assertNotNull(held.groupId())
+        );
+    }
+
+    @Test
+    void anAiApprovalPaysTheVerificationOnce() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.PASS);
+
+        VerificationReward reward = rewardRepository.findByVerification_Id(verificationId).orElseThrow();
+        assertAll(
+                () -> assertEquals(10, reward.getPoints()),
+                () -> assertEquals(SNAPSHOT_NOW, reward.getGrantedAt()),
+                () -> assertEquals(1, rewardRows(verificationId))
+        );
+    }
+
+    @Test
+    void anOperatorApprovalPaysTheVerification() {
+        Long verificationId = heldForReview(fixture(true));
+
+        reviewService.approve(verificationId, OPERATOR_ID);
+
+        assertAll(
+                () -> assertTrue(rewardRepository.existsByVerification_Id(verificationId)),
+                () -> assertEquals(1, rewardRows(verificationId))
+        );
+    }
+
+    @Test
+    void aRejectedVerificationIsNeverPaid() {
+        Fixture aiRejected = fixture(true);
+        mediaUploadService.issueCurrentUpload(aiRejected.groupId(), aiRejected.userId(), "image/jpeg", PHOTO.length);
+        Long retryable = mediaSubmissionService
+                .submitCurrent(aiRejected.groupId(), aiRejected.userId())
+                .verificationId();
+        completeCurrentAnalysis(retryable, AnalysisRecommendation.REJECT_CANDIDATE);
+
+        Long operatorRejected = heldForReview(fixture(true));
+        reviewService.reject(operatorRejected, OPERATOR_ID, "food is not visible");
+
+        assertAll(
+                () -> assertFalse(rewardRepository.existsByVerification_Id(retryable)),
+                () -> assertFalse(rewardRepository.existsByVerification_Id(operatorRejected))
+        );
+    }
+
+    /** A replayed approval - retried worker call, operator double click - must not pay twice. */
+    @Test
+    void replayingAnApprovalDoesNotPayTwice() {
+        Long verificationId = heldForReview(fixture(true));
+        reviewService.approve(verificationId, OPERATOR_ID);
+        Long rewardId = rewardRepository.findByVerification_Id(verificationId).orElseThrow().getId();
+
+        inTransaction(() -> {
+            rewardService.grantFor(verificationRepository.findById(verificationId).orElseThrow());
+            return null;
+        });
+
+        assertAll(
+                () -> assertEquals(1, rewardRows(verificationId)),
+                () -> assertEquals(
+                        rewardId,
+                        rewardRepository.findByVerification_Id(verificationId).orElseThrow().getId()
+                )
+        );
+    }
+
+    private int rewardRows(Long verificationId) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from verification_reward where verification_id = ?",
+                Integer.class,
+                verificationId
+        );
+    }
+
+    /** Spends the initial submission and the guided retry, so the AI puts the verification on hold. */
+    private Long heldForReview(Fixture fixture) {
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        Long verificationId = mediaSubmissionService
+                .submitCurrent(fixture.groupId(), fixture.userId())
+                .verificationId();
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.REJECT_CANDIDATE);
+
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId());
+        completeCurrentAnalysis(verificationId, AnalysisRecommendation.REJECT_CANDIDATE);
+
+        assertEquals(
+                VerificationStatus.REVIEW_REQUIRED,
+                verificationRepository.findById(verificationId).orElseThrow().getStatus()
+        );
+        return verificationId;
+    }
+
+    /**
+     * Rejects one specific analysis. This class shares its database across tests, so claiming "the next
+     * pending" would happily pick up a leftover from another test.
+     */
+    private void completeCurrentAnalysis(Long verificationId, AnalysisRecommendation recommendation) {
+        inTransaction(() -> {
+            verificationAnalysisRepository.findByVerification_Id(verificationId)
+                    .orElseThrow()
+                    .startProcessing(clock.instant());
+            return null;
+        });
+        VerificationAnalysis analysis = verificationAnalysisRepository
+                .findByVerification_Id(verificationId).orElseThrow();
+        VerificationAnalysisClaim claim = new VerificationAnalysisClaim(
+                analysis.getId(),
+                analysis.getAnalysisRequestId(),
+                analysis.getAttemptCount()
+        );
+        boolean present = recommendation == AnalysisRecommendation.PASS;
+        assertTrue(analysisResultService.completeSuccess(claim, new VerificationAnalysisSuccessResult(
+                recommendation,
+                VerificationTemplateCatalog.MEAL_PHOTO_RECORD_V1,
+                new VerificationAnalysisProvider.Result(
+                        "synthetic-model",
+                        new VerificationAnalysisObservation(
+                                present,
+                                new BigDecimal("0.7500"),
+                                false,
+                                true,
+                                VerificationAnalysisObservation.ReasonCode.OBSERVATION_COMPLETE
+                        )
+                )
+        )));
+    }
+
+    @Test
+    void submitOverwritesTheStoredPhotoWithItsSanitizedBytes() {
+        Fixture fixture = fixture(true);
+        byte[] tagged = TestPhotos.withApp1(PHOTO, GPS_TAGS);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", tagged.length);
+        mediaStorage.stageContent(tagged);
+
+        VerificationSubmissionResult submitted = mediaSubmissionService.submitCurrent(
+                fixture.groupId(), fixture.userId()
+        );
+
+        VerificationMedia media = verificationMediaRepository
+                .findByVerification_Id(submitted.verificationId())
+                .orElseThrow();
+        byte[] stored = mediaStorage.storedContent();
+        assertAll(
+                () -> assertEquals(1, mediaStorage.overwriteCount()),
+                () -> assertFalse(contains(stored, GPS_TAGS), "S3 must not keep GPS metadata"),
+                () -> assertArrayEquals(PHOTO, stored),
+                () -> assertEquals(PHOTO.length, media.getConfirmedSizeBytes()),
+                () -> assertEquals(tagged.length, media.getExpectedSizeBytes()),
+                () -> assertEquals(VerificationStatus.SUBMITTED, submitted.status())
+        );
+    }
+
+    @Test
+    void submitRejectsAPhotoThatCannotBeSanitized() {
+        Fixture fixture = fixture(true);
+        mediaUploadService.issueCurrentUpload(fixture.groupId(), fixture.userId(), "image/jpeg", PHOTO.length);
+        mediaStorage.stageContent(new byte[]{1, 2, 3, 4});
+
+        VerificationMediaCommandException exception = assertThrows(
+                VerificationMediaCommandException.class,
+                () -> mediaSubmissionService.submitCurrent(fixture.groupId(), fixture.userId())
+        );
+
+        assertAll(
+                () -> assertEquals(
+                        VerificationMediaCommandException.Reason.CONTENT_TYPE_MISMATCH,
+                        exception.reason()
+                ),
+                () -> assertEquals(0, mediaStorage.overwriteCount()),
+                () -> assertEquals(VerificationStatus.PENDING_UPLOAD, currentVerification(fixture).getStatus())
+        );
+    }
+
+    @Test
     void missingOrMismatchedStoredMediaCannotSubmit() {
         Fixture missingFixture = fixture();
         mediaUploadService.issueCurrentUpload(missingFixture.groupId(), missingFixture.userId(), "video/mp4", 100);
@@ -476,7 +862,7 @@ class VerificationCommandIntegrationTest {
 
         Fixture mismatchFixture = fixture();
         mediaUploadService.issueCurrentUpload(mismatchFixture.groupId(), mismatchFixture.userId(), "video/mp4", 100);
-        mediaStorage.replaceLastInspection(99, "image/jpeg");
+        mediaStorage.replaceLastInspection(101, "video/mp4");
 
         VerificationMediaCommandException mismatch = assertThrows(
                 VerificationMediaCommandException.class,
@@ -801,11 +1187,19 @@ class VerificationCommandIntegrationTest {
         }
     }
 
+    /** ISO-8859-1 maps every byte 1:1, so this is an exact byte-subsequence search. */
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        return new String(haystack, java.nio.charset.StandardCharsets.ISO_8859_1)
+                .contains(new String(needle, java.nio.charset.StandardCharsets.ISO_8859_1));
+    }
+
     static final class TestMediaStorage implements VerificationMediaStorage {
 
         private final Map<String, StoredMediaInspection> media = new ConcurrentHashMap<>();
+        private final Map<String, byte[]> contents = new ConcurrentHashMap<>();
         private final List<String> issuedKeys = new CopyOnWriteArrayList<>();
         private final AtomicInteger inspectCount = new AtomicInteger();
+        private final AtomicInteger overwriteCount = new AtomicInteger();
         private final AtomicReference<Runnable> beforeInspect = new AtomicReference<>(() -> {
         });
         private volatile boolean issueTransactionActive;
@@ -821,6 +1215,12 @@ class VerificationCommandIntegrationTest {
             issueTransactionActive = TransactionSynchronizationManager.isActualTransactionActive();
             issuedKeys.add(objectKey);
             media.put(objectKey, new StoredMediaInspection(objectKey, sizeBytes, contentType));
+            contents.put(
+                    objectKey,
+                    "image/jpeg".equals(contentType) && sizeBytes == PHOTO.length
+                            ? PHOTO.clone()
+                            : new byte[Math.toIntExact(sizeBytes)]
+            );
             return new UploadGrant(
                     URI.create("https://example.invalid/upload"),
                     "PUT",
@@ -841,8 +1241,50 @@ class VerificationCommandIntegrationTest {
             return inspection;
         }
 
+        @Override
+        public StoredMedia acquire(String objectKey, long maxBytes) {
+            byte[] content = contents.get(objectKey);
+            StoredMediaInspection inspection = media.get(objectKey);
+            if (content == null || inspection == null) {
+                throw new StorageException(StorageException.Reason.NOT_FOUND, "missing test object");
+            }
+            return new StoredMedia(objectKey, content.length, inspection.contentType(), content);
+        }
+
+        @Override
+        public URI issueDownload(String objectKey, Instant expiresAt) {
+            if (!contents.containsKey(objectKey)) {
+                throw new StorageException(StorageException.Reason.NOT_FOUND, "missing test object");
+            }
+            return URI.create("https://download.example.invalid/" + objectKey);
+        }
+
+        @Override
+        public void overwrite(String objectKey, String contentType, byte[] content) {
+            overwriteCount.incrementAndGet();
+            contents.put(objectKey, content.clone());
+            media.put(objectKey, new StoredMediaInspection(objectKey, content.length, contentType));
+        }
+
+        /** Replaces what the last issued key actually holds, so a test can upload real photo bytes. */
+        void stageContent(byte[] content) {
+            String key = issuedKeys.getLast();
+            contents.put(key, content.clone());
+            media.put(key, new StoredMediaInspection(key, content.length, media.get(key).contentType()));
+        }
+
+        byte[] storedContent() {
+            return contents.get(issuedKeys.getLast()).clone();
+        }
+
+        int overwriteCount() {
+            return overwriteCount.get();
+        }
+
         void reset() {
             media.clear();
+            contents.clear();
+            overwriteCount.set(0);
             issuedKeys.clear();
             inspectCount.set(0);
             beforeInspect.set(() -> {
@@ -878,6 +1320,7 @@ class VerificationCommandIntegrationTest {
         void replaceLastInspection(long sizeBytes, String contentType) {
             String key = issuedKeys.getLast();
             media.put(key, new StoredMediaInspection(key, sizeBytes, contentType));
+            contents.put(key, new byte[Math.toIntExact(sizeBytes)]);
         }
 
         StoredMediaInspection lastInspection() {

@@ -1,6 +1,7 @@
 package com.allog.verification.service;
 
 import com.allog.verification.domain.Verification;
+import com.allog.verification.media.PhotoMetadataSanitizer;
 import com.allog.verification.storage.VerificationMediaStorage;
 import org.springframework.stereotype.Service;
 
@@ -51,7 +52,47 @@ public class VerificationMediaSubmissionService {
                 target.expectedSizeBytes(),
                 inspection
         );
-        Verification verification = commandService.submitInspectedCurrent(groupId, currentUserId, inspection);
+        Verification verification = commandService.submitInspectedCurrent(
+                groupId,
+                currentUserId,
+                sanitizeInPlace(inspection)
+        );
         return VerificationSubmissionResult.from(verification);
+    }
+
+    /**
+     * Strips EXIF/GPS from the uploaded object and writes the result back over the same key, so the
+     * metadata never reaches permanent storage. Runs outside the submission transaction and returns the
+     * inspection describing what is actually stored afterwards.
+     */
+    private VerificationMediaStorage.StoredMediaInspection sanitizeInPlace(
+            VerificationMediaStorage.StoredMediaInspection inspection
+    ) {
+        if (!PhotoMetadataSanitizer.supports(inspection.contentType())) {
+            // ponytail: video carries GPS atoms of its own; sanitizing those is a separate step.
+            return inspection;
+        }
+        VerificationMediaStorage.StoredMedia stored = storage.acquire(
+                inspection.objectKey(),
+                inspection.contentLength()
+        );
+        final byte[] sanitized;
+        try {
+            sanitized = PhotoMetadataSanitizer.strip(inspection.contentType(), stored.content());
+        } catch (PhotoMetadataSanitizer.SanitizationException exception) {
+            throw new VerificationMediaCommandException(
+                    VerificationMediaCommandException.Reason.CONTENT_TYPE_MISMATCH,
+                    "stored media is not a readable image of the declared content type"
+            );
+        }
+        if (sanitized.length == stored.bodyLength()) {
+            return inspection;
+        }
+        storage.overwrite(inspection.objectKey(), inspection.contentType(), sanitized);
+        return new VerificationMediaStorage.StoredMediaInspection(
+                inspection.objectKey(),
+                sanitized.length,
+                inspection.contentType()
+        );
     }
 }

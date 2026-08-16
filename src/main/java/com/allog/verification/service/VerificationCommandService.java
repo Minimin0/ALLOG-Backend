@@ -115,10 +115,8 @@ public class VerificationCommandService {
                 verification.getScheduledDate()
         );
         requireBeforeDeadline(snapshotNow, deadline);
-        if (verification.getStatus() != VerificationStatus.PENDING_UPLOAD) {
-            if (verification.getStatus() == VerificationStatus.RETRY_REQUIRED) {
-                throw new VerificationCommandConflictException("user retry is not enabled");
-            }
+        boolean retry = verification.getStatus() == VerificationStatus.RETRY_REQUIRED;
+        if (verification.getStatus() != VerificationStatus.PENDING_UPLOAD && !retry) {
             throw new VerificationCommandConflictException("only PENDING_UPLOAD verification can issue upload grants");
         }
 
@@ -129,6 +127,14 @@ public class VerificationCommandService {
                         allowedContentType,
                         expectedSizeBytes
                 )));
+        // The retry uploads a different photo, so the binding moves to a fresh key before it is re-issued.
+        if (retry && media.isConfirmed()) {
+            media.rearmForRetry(
+                    "verification-media/" + UUID.randomUUID(),
+                    allowedContentType,
+                    expectedSizeBytes
+            );
+        }
         if (!media.getContentType().equals(allowedContentType)
                 || media.getExpectedSizeBytes() != expectedSizeBytes) {
             throw new VerificationMediaCommandException(
@@ -172,7 +178,11 @@ public class VerificationCommandService {
             return SubmissionTarget.pending(media);
         }
         if (verification.getStatus() == VerificationStatus.RETRY_REQUIRED) {
-            throw new VerificationCommandConflictException("user retry is not enabled");
+            requireInitialSubmissionWindow(current);
+            if (media == null || media.isConfirmed()) {
+                throw new VerificationCommandConflictException("retry requires a new media upload");
+            }
+            return SubmissionTarget.pending(media);
         }
         requireConfirmedMedia(media);
         return SubmissionTarget.idempotent(verification);
@@ -191,10 +201,8 @@ public class VerificationCommandService {
                 .findByVerificationIdForUpdate(verification.getId())
                 .orElse(null);
 
-        if (verification.getStatus() != VerificationStatus.PENDING_UPLOAD) {
-            if (verification.getStatus() == VerificationStatus.RETRY_REQUIRED) {
-                throw new VerificationCommandConflictException("user retry is not enabled");
-            }
+        boolean retry = verification.getStatus() == VerificationStatus.RETRY_REQUIRED;
+        if (verification.getStatus() != VerificationStatus.PENDING_UPLOAD && !retry) {
             requireConfirmedMedia(media);
             return verification;
         }
@@ -207,6 +215,9 @@ public class VerificationCommandService {
             );
         }
         if (media.isConfirmed()) {
+            if (retry) {
+                throw new VerificationCommandConflictException("retry requires a new media upload");
+            }
             throw new IllegalStateException("PENDING_UPLOAD verification cannot have confirmed media");
         }
         VerificationCriteria criteria = resolveCriteria(verification);
@@ -222,9 +233,15 @@ public class VerificationCommandService {
         media.confirm(inspection.contentLength(), eventClock);
         verification.submit(eventClock);
         UUID analysisRequestId = analysisRequestIdGenerator.generate();
-        verificationAnalysisRepository.save(criteria == null
-                ? VerificationAnalysis.createPending(verification, analysisRequestId)
-                : VerificationAnalysis.createPending(verification, analysisRequestId, criteria));
+        if (retry) {
+            verificationAnalysisRepository.findByVerification_Id(verification.getId())
+                    .orElseThrow(() -> new IllegalStateException("retry requires the previous analysis"))
+                    .rearmForRetry(analysisRequestId);
+        } else {
+            verificationAnalysisRepository.save(criteria == null
+                    ? VerificationAnalysis.createPending(verification, analysisRequestId)
+                    : VerificationAnalysis.createPending(verification, analysisRequestId, criteria));
+        }
         return verification;
     }
 

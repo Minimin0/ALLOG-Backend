@@ -66,6 +66,48 @@ class VerificationTest {
     }
 
     @Test
+    void submittedApprovesWithoutPassingThroughProcessing() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        verification.approve(SECOND);
+
+        assertAll(
+                () -> assertEquals(VerificationStatus.APPROVED, verification.getStatus()),
+                () -> assertEquals(SECOND.instant(), verification.getApprovedAt()),
+                () -> assertTrue(verification.getStatus().countsAsProgress())
+        );
+    }
+
+    @Test
+    void spendsExactlyOneGuidedRetry() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        assertTrue(verification.hasRetryRemaining());
+        verification.requestRetry();
+        verification.submit(SECOND);
+
+        assertAll(
+                () -> assertEquals(2, verification.getAttemptCount()),
+                () -> assertFalse(verification.hasRetryRemaining()),
+                // the retry is spent, so the verification can never be handed back to the member again
+                () -> assertThrows(IllegalStateException.class, verification::requestRetry)
+        );
+    }
+
+    /** A second rejection holds the verification without ever passing through PROCESSING. */
+    @Test
+    void submittedCanBeHeldForReview() {
+        Verification verification = verification();
+        verification.submit(FIRST);
+
+        verification.requestReview();
+
+        assertEquals(VerificationStatus.REVIEW_REQUIRED, verification.getStatus());
+    }
+
+    @Test
     void eventTimestampDoesNotDependOnClockZone() {
         Instant eventTime = Instant.parse("2026-08-11T15:30:00.123456Z");
         Verification utc = verification();
@@ -110,7 +152,7 @@ class VerificationTest {
         retry.requestRetry();
         Verification rejected = processing();
         rejected.requestReview();
-        rejected.reject();
+        rejected.rejectByOperator(SECOND, 99L, "operator note");
 
         assertAll(
                 () -> assertEquals(VerificationStatus.RETRY_REQUIRED, retry.getStatus()),
@@ -122,7 +164,7 @@ class VerificationTest {
     void processingCanReject() {
         Verification verification = processing();
 
-        verification.reject();
+        verification.rejectByOperator(SECOND, 99L, "operator note");
 
         assertEquals(VerificationStatus.REJECTED, verification.getStatus());
     }
@@ -200,7 +242,7 @@ class VerificationTest {
     @Test
     void blocksRejectedToApproved() {
         Verification verification = processing();
-        verification.reject();
+        verification.rejectByOperator(SECOND, 99L, "operator note");
 
         assertThrows(IllegalStateException.class, () -> verification.approve(FIRST));
     }

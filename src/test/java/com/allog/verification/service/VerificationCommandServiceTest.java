@@ -430,7 +430,7 @@ class VerificationCommandServiceTest {
             case REVIEW_REQUIRED -> verification.requestReview();
             case APPROVED -> verification.approve(second);
             case RETRY_REQUIRED -> verification.requestRetry();
-            case REJECTED -> verification.reject();
+            case REJECTED -> verification.rejectByOperator(second, 99L, "operator note");
             case INVALIDATED -> {
                 verification.approve(second);
                 verification.invalidate(second);

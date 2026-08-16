@@ -74,10 +74,11 @@ final class VerificationMediaPolicy {
             );
         }
         requireAllowedSize(inspection.contentLength());
-        if (expectedSizeBytes != inspection.contentLength()) {
+        // Upper bound, not equality: a re-inspected object may already have been shrunk by EXIF sanitization.
+        if (inspection.contentLength() > expectedSizeBytes) {
             throw new VerificationMediaCommandException(
                     VerificationMediaCommandException.Reason.SIZE_MISMATCH,
-                    "stored media size does not match the upload intent"
+                    "stored media is larger than the upload intent"
             );
         }
         String actualContentType;
