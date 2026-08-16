@@ -6,6 +6,7 @@ import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
+import com.allog.heart.domain.HeartWallet;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
 import com.allog.group.service.RoutineGroupActivationService;
@@ -245,6 +246,7 @@ class RoutineGroupJoinIntegrationTest {
             User joiner = User.create();
             entityManager.persist(owner);
             entityManager.persist(joiner);
+            entityManager.persist(HeartWallet.openWith(joiner, 3));
             RoutineDefinition definition = new RoutineDefinition("아침 식사", "매일 아침 식사를 기록합니다");
             entityManager.persist(definition);
 

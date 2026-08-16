@@ -6,6 +6,9 @@ import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
 import com.allog.group.domain.RoutineGroup;
 import com.allog.group.domain.RoutineGroupStatus;
+import com.allog.heart.domain.HeartLedgerEntry;
+import com.allog.heart.domain.HeartTransactionType;
+import com.allog.heart.domain.HeartWallet;
 import com.allog.heart.repository.HeartLedgerEntryRepository;
 import com.allog.routine.domain.RoutineDefinition;
 import com.allog.routine.domain.RoutineSchedule;
@@ -85,6 +88,8 @@ class GroupLifecycleIntegrationTest {
     @AfterEach
     void clearGroupTables() {
         inTransaction(() -> {
+            entityManager.createQuery("delete from HeartLedgerEntry").executeUpdate();
+            entityManager.createQuery("delete from HeartWallet").executeUpdate();
             entityManager.createQuery("delete from Verification").executeUpdate();
             entityManager.createQuery("delete from RoutineSchedule").executeUpdate();
             entityManager.createQuery("delete from GroupMember").executeUpdate();
@@ -328,14 +333,14 @@ class GroupLifecycleIntegrationTest {
 
     /** Lifecycle records what happened; paying anyone back is M3-C's job and must not start here. */
     @Test
-    void noLifecycleCommandTouchesHearts() {
+    void preStartLifecycleCommandsRefundTheOriginalSpends() {
         Fixture fixture = fullGroup();
 
         membershipLifecycleService.leave(fixture.groupId(), fixture.memberUserId());
         membershipLifecycleService.cancel(fixture.groupId(), fixture.ownerUserId());
         reconciler.reconcile(fixture.groupId());
 
-        assertEquals(0, heartLedgerRepository.count(), "no heart moved during a lifecycle change");
+        assertEquals(4, heartLedgerRepository.count(), "both debits and their exact refunds are audited");
     }
 
     private Fixture fullGroup() {
@@ -391,6 +396,13 @@ class GroupLifecycleIntegrationTest {
             }
             entityManager.persist(ownerMember);
             entityManager.persist(member);
+            entityManager.flush();
+            entityManager.persist(HeartWallet.openWith(owner, 2));
+            entityManager.persist(HeartWallet.openWith(memberUser, 2));
+            entityManager.persist(HeartLedgerEntry.record(
+                    owner, HeartTransactionType.GROUP_JOIN_SPEND, 1, ownerMember.getId()));
+            entityManager.persist(HeartLedgerEntry.record(
+                    memberUser, HeartTransactionType.GROUP_JOIN_SPEND, 1, member.getId()));
             entityManager.flush();
 
             return new Fixture(

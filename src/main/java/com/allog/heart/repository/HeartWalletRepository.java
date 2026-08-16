@@ -17,7 +17,7 @@ public interface HeartWalletRepository extends JpaRepository<HeartWallet, Long> 
      * balance and spending against it. Returns 0 when the wallet is missing or too small - the caller
      * decides which, it is not guessed here.
      */
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying(flushAutomatically = true)
     @Query("""
             update HeartWallet wallet
                set wallet.balance = wallet.balance - :amount
@@ -26,7 +26,7 @@ public interface HeartWalletRepository extends JpaRepository<HeartWallet, Long> 
             """)
     int decrementIfSufficient(@Param("userId") Long userId, @Param("amount") int amount);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying(flushAutomatically = true)
     @Query("""
             update HeartWallet wallet
                set wallet.balance = wallet.balance + :amount

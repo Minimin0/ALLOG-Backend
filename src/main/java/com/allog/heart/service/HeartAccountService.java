@@ -60,8 +60,8 @@ public class HeartAccountService {
     }
 
     /**
-     * Charges a group join. Not called by anything yet: the cost is switched on in M3-C, once a
-     * member has a way to get the hearts back when a group never starts.
+     * Charges a group join inside the caller transaction. M3-C calls this only after
+     * the persisted membership has supplied its immutable ledger source id.
      *
      * <p>The debit is one conditional statement, so two joins racing on a single heart cannot both
      * succeed, and the ledger's unique key means a retried join charges once.
