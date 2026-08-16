@@ -65,6 +65,19 @@ jobs:
           GROUP_JOIN_CONCURRENCY_DB_PASSWORD: ci-local-throwaway
         run: ./gradlew test --rerun-tasks --console=plain
 
+      # Without this the MySQL coverage is unenforced: if the wiring above ever
+      # breaks, these tests go back to skipping and the build stays green.
+      - name: Assert InnoDB concurrency tests ran
+        run: |
+          report=build/test-results/test/TEST-com.allog.group.service.RoutineGroupJoinConcurrencyTest.xml
+          test -f "$report"
+          counts=$(grep -o 'tests="[0-9]*" skipped="[0-9]*"' "$report" | head -1)
+          echo "group-join concurrency: $counts"
+          if ! grep -q 'skipped="0"' "$report"; then
+            echo "concurrency tests did not run against MySQL" >&2
+            exit 1
+          fi
+
       # Separate from tests on purpose: a build.gradle dependency break passes the
       # test task and only fails here.
       - name: Build executable jar
