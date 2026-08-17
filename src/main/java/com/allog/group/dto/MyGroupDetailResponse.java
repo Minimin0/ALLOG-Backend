@@ -22,10 +22,10 @@ public record MyGroupDetailResponse(
         Membership membership
 ) {
 
-    public static MyGroupDetailResponse from(GroupMember membership, RoutineSchedule schedule) {
+    public static MyGroupDetailResponse from(GroupMember membership, RoutineSchedule schedule, int currentMembers) {
         RoutineGroup group = membership.getRoutineGroup();
         return new MyGroupDetailResponse(
-                Group.from(group),
+                Group.from(group, currentMembers),
                 Routine.from(group.getRoutineDefinition()),
                 schedule == null ? null : Schedule.from(schedule),
                 Membership.from(membership)
@@ -38,16 +38,18 @@ public record MyGroupDetailResponse(
             GroupVisibility visibility,
             RoutineGroupStatus status,
             int maxMembers,
+            int currentMembers,
             int requiredCompletionCount
     ) {
 
-        private static Group from(RoutineGroup group) {
+        private static Group from(RoutineGroup group, int currentMembers) {
             return new Group(
                     group.getId(),
                     group.getName(),
                     group.getVisibility(),
                     group.getStatus(),
                     group.getMaxMembers(),
+                    currentMembers,
                     group.getRequiredCompletionCount()
             );
         }
