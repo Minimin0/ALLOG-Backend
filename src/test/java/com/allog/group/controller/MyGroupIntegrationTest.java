@@ -199,9 +199,11 @@ class MyGroupIntegrationTest {
         mockMvc.perform(authenticatedDetailGet(fixture.userId(), fixture.groupId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.*", hasSize(4)))
-                .andExpect(jsonPath("$.group.*", hasSize(6)))
+                .andExpect(jsonPath("$.group.*", hasSize(7)))
                 .andExpect(jsonPath("$.group.groupId").value(fixture.groupId()))
                 .andExpect(jsonPath("$.group.visibility").value("PRIVATE"))
+                // The fixture holds one membership, and every status this runs with is a visible one.
+                .andExpect(jsonPath("$.group.currentMembers").value(1))
                 .andExpect(jsonPath("$.routine.*", hasSize(2)))
                 .andExpect(jsonPath("$.routine.description", nullValue()))
                 .andExpect(jsonPath("$.schedule", nullValue()))
@@ -215,7 +217,9 @@ class MyGroupIntegrationTest {
                 .andExpect(jsonPath("$.aiCoach").doesNotExist())
                 .andExpect(jsonPath("$.memberCount").doesNotExist());
 
-        assertEquals(2, statistics.getPrepareStatementCount());
+        // Membership, schedule, and the visible-member count. The count is its own statement on
+        // purpose: joining it onto the membership read would fan the row out per member.
+        assertEquals(3, statistics.getPrepareStatementCount());
     }
 
     @ParameterizedTest
@@ -264,7 +268,7 @@ class MyGroupIntegrationTest {
     }
 
     @Test
-    void returnsDailyScheduleWithEmptySpecificDaysInTwoQueries() throws Exception {
+    void returnsDailyScheduleWithEmptySpecificDaysInThreeQueries() throws Exception {
         DetailFixture fixture = detailFixture(
                 GroupVisibility.PUBLIC,
                 GroupMemberStatus.ACTIVE,
@@ -283,11 +287,11 @@ class MyGroupIntegrationTest {
                 .andExpect(jsonPath("$.schedule.timezone").value("Asia/Seoul"))
                 .andExpect(jsonPath("$.schedule.specificDays").isEmpty());
 
-        assertEquals(2, statistics.getPrepareStatementCount());
+        assertEquals(3, statistics.getPrepareStatementCount());
     }
 
     @Test
-    void returnsSpecificDaysInStableWeekdayOrderInTwoQueries() throws Exception {
+    void returnsSpecificDaysInStableWeekdayOrderInThreeQueries() throws Exception {
         DetailFixture fixture = detailFixture(
                 GroupVisibility.PUBLIC,
                 GroupMemberStatus.ACTIVE,
@@ -303,7 +307,7 @@ class MyGroupIntegrationTest {
                         "MONDAY", "WEDNESDAY", "FRIDAY"
                 )));
 
-        assertEquals(2, statistics.getPrepareStatementCount());
+        assertEquals(3, statistics.getPrepareStatementCount());
     }
 
     private User persistUser() {
