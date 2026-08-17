@@ -91,7 +91,8 @@ class GroupAccessControllerIntegrationTest {
         Fixture fixture = fixture(GroupVisibility.PRIVATE, RoutineGroupStatus.RECRUITING, 2);
 
         mockMvc.perform(authenticated(post("/api/v1/groups/{groupId}/join", fixture.groupId()), fixture.guestUserId()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRIVATE_GROUP_REQUIRES_INVITE"));
         assertEquals(3, balance(fixture.guestUserId()));
         mockMvc.perform(authenticated(get("/api/v1/me/groups/{groupId}", fixture.groupId()), fixture.guestUserId()))
                 .andExpect(status().isNotFound());
@@ -157,7 +158,8 @@ class GroupAccessControllerIntegrationTest {
         mockMvc.perform(authenticated(post("/api/v1/groups/join-by-invite")
                         .contentType("application/json")
                         .content("{\"code\":\"" + code + "\"}"), fixture.guestUserId()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("NOT_JOINABLE"));
     }
 
     private Fixture fixture(GroupVisibility visibility, RoutineGroupStatus statusValue, int maxMembers) {

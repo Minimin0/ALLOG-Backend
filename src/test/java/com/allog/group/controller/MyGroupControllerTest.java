@@ -121,7 +121,7 @@ class MyGroupControllerTest {
     void returnsMemberScopedDetailUsingOnlyPrincipalIdentity() throws Exception {
         when(queryService.readMyGroup(USER_ID, 42L)).thenReturn(new MyGroupDetailResponse(
                 new Group(42L, "아침 물 마시기", GroupVisibility.PRIVATE,
-                        RoutineGroupStatus.ACTIVE, 10, 5),
+                        RoutineGroupStatus.ACTIVE, 10, 3, 5),
                 new Routine("물 마시기", "매일 물 2L 마시기"),
                 new Schedule(
                         ScheduleType.SPECIFIC_DAYS,
@@ -139,11 +139,12 @@ class MyGroupControllerTest {
                         .header("X-User-Id", "999999"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.*", hasSize(4)))
-                .andExpect(jsonPath("$.group.*", hasSize(6)))
+                .andExpect(jsonPath("$.group.*", hasSize(7)))
                 .andExpect(jsonPath("$.routine.*", hasSize(2)))
                 .andExpect(jsonPath("$.schedule.*", hasSize(6)))
                 .andExpect(jsonPath("$.membership.*", hasSize(2)))
                 .andExpect(jsonPath("$.group.groupId").value(42))
+                .andExpect(jsonPath("$.group.currentMembers").value(3))
                 .andExpect(jsonPath("$.group.visibility").value("PRIVATE"))
                 .andExpect(jsonPath("$.schedule.specificDays", contains(
                         "MONDAY", "WEDNESDAY", "FRIDAY"

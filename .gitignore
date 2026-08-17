@@ -36,6 +36,10 @@ logs/
 *.key
 *.p12
 *.jks
+# Firebase Android client config. It belongs to the app, not the server, and it
+# sits in this working tree only because E2E needs it nearby - keeping it
+# untracked by convention alone is one `git add .` away from being committed.
+google-services.json
 
 # Local R&D calibration sources. Curated fixtures live in
 # src/test/resources/verification/evaluation/ instead.

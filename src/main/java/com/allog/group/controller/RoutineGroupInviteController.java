@@ -47,12 +47,12 @@ public class RoutineGroupInviteController {
     }
 
     @ExceptionHandler(GroupInviteException.class)
-    ResponseEntity<Void> inviteFailure(GroupInviteException exception) {
+    ResponseEntity<GroupHeartErrorResponse> inviteFailure(GroupInviteException exception) {
         HttpStatus status = switch (exception.reason()) {
             case GROUP_NOT_FOUND, INVITE_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case NOT_PRIVATE -> HttpStatus.CONFLICT;
         };
-        return ResponseEntity.status(status).build();
+        return ResponseEntity.status(status).body(new GroupHeartErrorResponse(exception.reason().name()));
     }
 
     @ExceptionHandler(InsufficientHeartsException.class)
@@ -62,11 +62,11 @@ public class RoutineGroupInviteController {
     }
 
     @ExceptionHandler(RoutineGroupJoinException.class)
-    ResponseEntity<Void> joinFailure(RoutineGroupJoinException exception) {
+    ResponseEntity<GroupHeartErrorResponse> joinFailure(RoutineGroupJoinException exception) {
         HttpStatus status = switch (exception.reason()) {
             case GROUP_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case ALREADY_JOINED, NOT_JOINABLE, GROUP_FULL, PRIVATE_GROUP_REQUIRES_INVITE -> HttpStatus.CONFLICT;
         };
-        return ResponseEntity.status(status).build();
+        return ResponseEntity.status(status).body(new GroupHeartErrorResponse(exception.reason().name()));
     }
 }

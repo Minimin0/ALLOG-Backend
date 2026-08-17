@@ -44,6 +44,8 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
 
     long countByRoutineGroup_IdAndStatus(Long routineGroupId, GroupMemberStatus status);
 
+    long countByRoutineGroup_IdAndStatusIn(Long routineGroupId, Collection<GroupMemberStatus> statuses);
+
     List<GroupMember> findAllByRoutineGroup_Id(Long routineGroupId);
 
     @EntityGraph(attributePaths = "routineGroup")

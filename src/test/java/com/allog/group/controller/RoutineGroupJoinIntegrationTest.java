@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
@@ -124,8 +125,11 @@ class RoutineGroupJoinIntegrationTest {
     void rejectsJoiningAGroupThatIsAlreadyFull() throws Exception {
         Fixture fixture = fixture(1, RoutineGroupStatus.RECRUITING, true);
 
+        // The client shows a different message per reason, so the reason travels in the body.
+        // Without this the switch could map every rejection to the same code and stay green.
         mockMvc.perform(join(fixture.groupId(), fixture.joinerId()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("GROUP_FULL"));
 
         inTransaction(() -> {
             assertEquals(1, joinedCount(fixture.groupId()));
@@ -138,7 +142,9 @@ class RoutineGroupJoinIntegrationTest {
         Fixture fixture = fixture(5, RoutineGroupStatus.RECRUITING, true);
 
         mockMvc.perform(join(fixture.groupId(), fixture.joinerId())).andExpect(status().isNoContent());
-        mockMvc.perform(join(fixture.groupId(), fixture.joinerId())).andExpect(status().isConflict());
+        mockMvc.perform(join(fixture.groupId(), fixture.joinerId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ALREADY_JOINED"));
 
         inTransaction(() -> {
             assertEquals(2, joinedCount(fixture.groupId()));
@@ -151,7 +157,8 @@ class RoutineGroupJoinIntegrationTest {
         Fixture fixture = fixture(5, RoutineGroupStatus.ACTIVE, true);
 
         mockMvc.perform(join(fixture.groupId(), fixture.joinerId()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("NOT_JOINABLE"));
 
         inTransaction(() -> {
             assertEquals(1, joinedCount(fixture.groupId()));
@@ -163,8 +170,11 @@ class RoutineGroupJoinIntegrationTest {
     void rejectsUnknownGroup() throws Exception {
         Fixture fixture = fixture(5, RoutineGroupStatus.RECRUITING, true);
 
+        // The same handler answers 404, so this one carries a body too. Pinning it here keeps a
+        // client that reads the body from meeting an empty 404 it did not expect.
         mockMvc.perform(join(fixture.groupId() + 9999, fixture.joinerId()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("GROUP_NOT_FOUND"));
     }
 
     @Test

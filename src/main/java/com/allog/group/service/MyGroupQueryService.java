@@ -54,9 +54,13 @@ public class MyGroupQueryService {
                         VISIBLE_STATUSES
                 )
                 .orElseThrow(MyGroupNotFoundException::new);
+        int currentMembers = Math.toIntExact(
+                repository.countByRoutineGroup_IdAndStatusIn(groupId, VISIBLE_STATUSES)
+        );
         return MyGroupDetailResponse.from(
                 membership,
-                scheduleRepository.findByRoutineGroup_Id(groupId).orElse(null)
+                scheduleRepository.findByRoutineGroup_Id(groupId).orElse(null),
+                currentMembers
         );
     }
 }
