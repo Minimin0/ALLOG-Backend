@@ -1,4 +1,5 @@
 package com.allog.group.service;
+import com.allog.heart.service.HeartAccountService;
 
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberStatus;
@@ -39,17 +40,20 @@ public class GroupFinalizationService {
     private final GroupMemberRepository groupMemberRepository;
     private final RoutineScheduleRepository routineScheduleRepository;
     private final VerificationRepository verificationRepository;
+    private final HeartAccountService heartAccountService;
     private final PersonalProgressCalculator progressCalculator = new PersonalProgressCalculator();
     private final ParticipationCompletionEvaluator completionEvaluator = new ParticipationCompletionEvaluator();
 
     public GroupFinalizationService(
             GroupMemberRepository groupMemberRepository,
             RoutineScheduleRepository routineScheduleRepository,
-            VerificationRepository verificationRepository
+            VerificationRepository verificationRepository,
+            HeartAccountService heartAccountService
     ) {
         this.groupMemberRepository = Objects.requireNonNull(groupMemberRepository);
         this.routineScheduleRepository = Objects.requireNonNull(routineScheduleRepository);
         this.verificationRepository = Objects.requireNonNull(verificationRepository);
+        this.heartAccountService = Objects.requireNonNull(heartAccountService);
     }
 
     /**
@@ -102,6 +106,7 @@ public class GroupFinalizationService {
         for (Decision decision : decisions) {
             if (decision.outcome() == ParticipationCompletionEvaluation.Outcome.COMPLETED) {
                 decision.member().completeParticipation();
+                heartAccountService.refundGroupJoin(decision.member().getId());
             } else {
                 decision.member().failParticipation();
             }
