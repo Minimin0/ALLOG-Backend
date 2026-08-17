@@ -1,4 +1,8 @@
 package com.allog.group.service;
+import com.allog.heart.domain.HeartLedgerEntry;
+import com.allog.heart.domain.HeartTransactionType;
+import com.allog.heart.domain.HeartWallet;
+import com.allog.heart.service.HeartAccountService;
 
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
@@ -60,6 +64,8 @@ class GroupFinalizationIntegrationTest {
 
     @Autowired
     private RoutineGroupLifecycleReconciler reconciler;
+    @Autowired
+    private HeartAccountService heartAccountService;
 
     @Autowired
     private EntityManager entityManager;
@@ -76,6 +82,8 @@ class GroupFinalizationIntegrationTest {
     void clearGroupTables() {
         inTransaction(() -> {
             entityManager.createQuery("delete from Verification").executeUpdate();
+            entityManager.createQuery("delete from HeartLedgerEntry").executeUpdate();
+            entityManager.createQuery("delete from HeartWallet").executeUpdate();
             entityManager.createQuery("delete from RoutineSchedule").executeUpdate();
             entityManager.createQuery("delete from GroupMember").executeUpdate();
             entityManager.createQuery("delete from RoutineGroup").executeUpdate();
@@ -131,6 +139,8 @@ class GroupFinalizationIntegrationTest {
             // A finalised member still took part: the start timestamp is the participation contract.
             assertNotNull(reached.getParticipationStartedAt());
             assertNotNull(missed.getParticipationStartedAt());
+            assertEquals(3, heartAccountService.balanceOf(fixture.firstUserId()));
+            assertEquals(2, heartAccountService.balanceOf(fixture.secondUserId()));
             return null;
         });
     }
@@ -160,6 +170,8 @@ class GroupFinalizationIntegrationTest {
             assertEquals(RoutineGroupStatus.COMPLETED, group(fixture.groupId()).getStatus());
             assertEquals(GroupMemberStatus.FAILED, member(fixture.firstMemberId()).getStatus());
             assertEquals(GroupMemberStatus.FAILED, member(fixture.secondMemberId()).getStatus());
+            assertEquals(2, heartAccountService.balanceOf(fixture.firstUserId()));
+            assertEquals(2, heartAccountService.balanceOf(fixture.secondUserId()));
             return null;
         });
     }
@@ -176,6 +188,8 @@ class GroupFinalizationIntegrationTest {
             assertEquals(RoutineGroupStatus.COMPLETED, group(fixture.groupId()).getStatus());
             assertEquals(GroupMemberStatus.COMPLETED, member(fixture.firstMemberId()).getStatus());
             assertEquals(GroupMemberStatus.FAILED, member(fixture.secondMemberId()).getStatus());
+            assertEquals(3, heartAccountService.balanceOf(fixture.firstUserId()));
+            assertEquals(2, heartAccountService.balanceOf(fixture.secondUserId()));
             return null;
         });
     }
@@ -209,6 +223,11 @@ class GroupFinalizationIntegrationTest {
             second.startParticipation(PARTICIPATION_START);
             entityManager.persist(first);
             entityManager.persist(second);
+            entityManager.flush();
+            entityManager.persist(HeartWallet.openWith(owner, 2));
+            entityManager.persist(HeartWallet.openWith(other, 2));
+            entityManager.persist(HeartLedgerEntry.record(owner, HeartTransactionType.GROUP_JOIN_SPEND, 1, first.getId()));
+            entityManager.persist(HeartLedgerEntry.record(other, HeartTransactionType.GROUP_JOIN_SPEND, 1, second.getId()));
 
             for (int day = 0; day < approvedForFirstMember; day++) {
                 approve(first, schedule, START.plusDays(day));
@@ -217,7 +236,7 @@ class GroupFinalizationIntegrationTest {
                 submitWithoutDecision(second, schedule, START.plusDays(day));
             }
             entityManager.flush();
-            return new Fixture(group.getId(), first.getId(), second.getId());
+            return new Fixture(group.getId(), first.getId(), second.getId(), owner.getId(), other.getId());
         });
     }
 
@@ -251,7 +270,7 @@ class GroupFinalizationIntegrationTest {
         return transaction.execute(status -> action.get());
     }
 
-    private record Fixture(Long groupId, Long firstMemberId, Long secondMemberId) {
+    private record Fixture(Long groupId, Long firstMemberId, Long secondMemberId, Long firstUserId, Long secondUserId) {
     }
 
     /** Lets a test stand either side of the final deadline without waiting for it. */
