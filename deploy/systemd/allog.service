@@ -1,0 +1,57 @@
+# ALLOG Backend systemd 유닛.
+#
+# 설치:
+#   sudo cp deploy/systemd/allog.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now allog
+#
+# 전제:
+#   /opt/allog/app.jar                        644 allog:allog
+#   /etc/allog/allog.env                      600 allog:allog   (deploy/allog.env.template 참고)
+#   /etc/allog/firebase-service-account.json  600 allog:allog   (Firebase 인증을 켤 때만)
+#   useradd --system --no-create-home --shell /usr/sbin/nologin allog
+#
+# 이 파일에는 시크릿이 없다. 값은 전부 EnvironmentFile 에서 온다.
+
+[Unit]
+Description=ALLOG Backend
+Documentation=https://github.com/Minimin0/ALLOG-Backend
+# Flyway 가 기동 중에 DB 에 붙으므로 MySQL 이 먼저 떠 있어야 한다.
+After=network-online.target mysql.service
+Wants=network-online.target
+Requires=mysql.service
+
+[Service]
+Type=exec
+User=allog
+Group=allog
+WorkingDirectory=/opt/allog
+
+EnvironmentFile=/etc/allog/allog.env
+
+# RAM 4GB 에서 MySQL 과 동거하는 것을 전제로 한 값이다.
+# 힙 2g 로 올리면 비힙까지 합쳐 3.6GB 에 달해 OOM Killer 위험이 있다.
+# 사양이 커지면 이 줄만 조정한다.
+ExecStart=/usr/bin/java -Xmx1g -XX:MaxMetaspaceSize=256m -jar /opt/allog/app.jar
+
+# Spring Boot 는 SIGTERM 에 143 으로 끝난다. 이 줄이 없으면 정상 종료가
+# 매번 실패로 기록되고 Restart=on-failure 가 오작동한다.
+SuccessExitStatus=143
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=allog
+
+# 앱은 jar 를 읽고 /tmp 만 쓴다. 그 밖은 잠근다.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

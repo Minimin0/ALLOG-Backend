@@ -45,3 +45,7 @@ google-services.json
 # src/test/resources/verification/evaluation/ instead.
 ai 개발/calibration-images/
 ai 개발/test video/
+
+# 배포 시크릿. 템플릿만 추적하고 채워진 값은 절대 커밋하지 않는다.
+deploy/allog.env
+deploy/*.json
