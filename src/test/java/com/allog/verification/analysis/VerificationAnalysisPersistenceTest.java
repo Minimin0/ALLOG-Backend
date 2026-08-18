@@ -1676,11 +1676,12 @@ class VerificationAnalysisPersistenceTest {
         VerificationMediaProperties verificationAnalysisMediaProperties() {
             return new VerificationMediaProperties(
                     true,
-                    "test-bucket",
-                    "ap-northeast-2",
                     1_024,
                     Duration.ofMinutes(5),
-                    Set.of("video/mp4", "image/jpeg")
+                    Set.of("video/mp4", "image/jpeg"),
+                    "/tmp/allog-verification-media-analysis-test",
+                    "https://api.allog-app.store",
+                    "0123456789abcdef0123456789abcdef"
             );
         }
     }

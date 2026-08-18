@@ -45,6 +45,7 @@ public class SecurityConfiguration {
                 ))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.POST, "/api/v1/dev/ai-coach/preview").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/verification-media/uploads/*").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(firebaseFilter, AnonymousAuthenticationFilter.class);
         return http.build();
