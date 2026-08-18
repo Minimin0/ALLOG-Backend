@@ -48,6 +48,7 @@ SyslogIdentifier=allog
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+ReadWritePaths=/var/lib/allog/verification-media
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

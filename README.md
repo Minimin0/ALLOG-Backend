@@ -105,3 +105,9 @@ main
 6. 테스트하지 않은 기능을 테스트 완료로 표시하지 않습니다.
 7. `main`에는 직접 푸시하지 않습니다.
 8. 배포 가능한 버전만 `develop`에서 `main`으로 병합합니다.
+
+## Production integration contract
+
+Production API: https://api.allog-app.store. Android receives this endpoint only through EXPO_PUBLIC_API_BASE_URL. Firebase Admin credentials, database passwords, AI API keys, and local signing secrets are backend runtime secrets; none belong in Android bundles or source control.
+
+Verification media follows Android -> nginx -> Spring -> Gabia private local filesystem. VerificationMediaStorage remains the abstraction and local filesystem is the production adapter. Group lifecycle, deadline, Heart balance, reward, and verification decisions remain backend authority; neither Android nor AI becomes a business-truth source.
