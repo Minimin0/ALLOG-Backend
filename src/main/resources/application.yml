@@ -11,14 +11,12 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
-
 ai:
   openai:
     api-key: "${OPENAI_API_KEY:}"
   coach:
     model: "${AI_COACH_MODEL:}"
     timeout: "${AI_COACH_TIMEOUT:3s}"
-
 allog:
   auth:
     firebase:
@@ -29,7 +27,6 @@ allog:
       enabled: "${GROUP_LIFECYCLE_ENABLED:true}"
       reconcile-delay: "${GROUP_LIFECYCLE_RECONCILE_DELAY:60s}"
       batch-size: "${GROUP_LIFECYCLE_BATCH_SIZE:100}"
-
   verification:
     analysis:
       anthropic:
@@ -39,8 +36,9 @@ allog:
         request-timeout: "${VERIFICATION_ANALYSIS_ANTHROPIC_REQUEST_TIMEOUT:30s}"
     media:
       enabled: "${VERIFICATION_MEDIA_ENABLED:false}"
-      region: "${AWS_REGION:}"
-      bucket: "${VERIFICATION_MEDIA_BUCKET:}"
+      local-root: "${VERIFICATION_MEDIA_LOCAL_ROOT:}"
+      local-base-url: "${VERIFICATION_MEDIA_LOCAL_BASE_URL:}"
+      local-signing-secret: "${VERIFICATION_MEDIA_LOCAL_SIGNING_SECRET:}"
       max-bytes: "${VERIFICATION_MEDIA_MAX_BYTES:0}"
       upload-expiry: "${VERIFICATION_MEDIA_UPLOAD_EXPIRY:0s}"
       allowed-content-types: "${VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES:}"

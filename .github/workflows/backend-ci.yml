@@ -57,7 +57,7 @@ jobs:
       # The group-join concurrency tests are gated on GROUP_JOIN_CONCURRENCY_DB_URL
       # and skip without it, because H2 locking proves nothing about InnoDB. Wiring
       # the service container here is what makes them actually run.
-      # No Anthropic/OpenAI/S3 keys are set, so those suites stay skipped by design.
+      # No Anthropic/OpenAI keys or enabled verification-media configuration is set, so external-provider suites stay skipped by design.
       - name: Java tests
         env:
           GROUP_JOIN_CONCURRENCY_DB_URL: jdbc:mysql://127.0.0.1:3306/allog_ci?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true

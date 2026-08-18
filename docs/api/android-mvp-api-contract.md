@@ -256,7 +256,7 @@ Note this is a **POST**, not a GET — it creates the slot if today has none.
 ```
 `VerificationStatus` = `PENDING_UPLOAD|SUBMITTED|PROCESSING|APPROVED|REVIEW_REQUIRED|RETRY_REQUIRED|REJECTED|INVALIDATED`
 
-### `POST …/verifications/current/upload-intent` — presigned upload
+### `POST …/verifications/current/upload-intent` — signed temporary upload
 `{ "contentType": "image/jpeg", "sizeBytes": 148985 }` → **200**
 ```json
 { "method": "PUT", "uploadUrl": "https://…", "requiredHeaders": { "Content-Type": ["image/jpeg"] },
@@ -279,7 +279,7 @@ mismatch, lifecycle conflict) · 413 too large · 415 unsupported/mismatched con
 - **PHOTO only**: `image/jpeg` and `image/png` are the sanitizable types. VIDEO and HEIC are **not**
   supported in this MVP.
 - EXIF/GPS is stripped server-side before storage and before any AI call.
-- ⚠️ **`VERIFICATION_MEDIA_ENABLED` defaults to `false`.** Until S3 is provisioned, `upload-intent`
+- ⚠️ **`VERIFICATION_MEDIA_ENABLED` defaults to `false`.** Until local verification media storage is configured, `upload-intent`
   and `submit` answer **503**. Creating the slot still works. See *Cloud Deployment* below.
 - An AI or network failure is **never** recorded as the member failing — it stays pending for retry.
 
@@ -327,7 +327,7 @@ These are configuration, not code, and are **not provisioned yet**:
 
 | Feature | Env | Default | Effect on Android |
 |---|---|---|---|
-| Verification media (S3) | `VERIFICATION_MEDIA_ENABLED`, `AWS_REGION`, `VERIFICATION_MEDIA_BUCKET`, `VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES` | `false` | `upload-intent` / `submit` → **503** |
+| Verification media (private local storage) | `VERIFICATION_MEDIA_ENABLED`, `VERIFICATION_MEDIA_LOCAL_ROOT`, `VERIFICATION_MEDIA_LOCAL_BASE_URL`, `VERIFICATION_MEDIA_LOCAL_SIGNING_SECRET`, `VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES` | `false` | `upload-intent` / `submit` → **503** |
 | AI verification analysis | `VERIFICATION_ANALYSIS_ANTHROPIC_ENABLED`, `ANTHROPIC_API_KEY` | `false` | submitted verifications stay pending until an operator decides |
 | AI coach copy | `OPENAI_API_KEY` | empty | coach answers with `generationType: TEMPLATE` |
 | Firebase auth | `FIREBASE_AUTH_ENABLED`, `FIREBASE_PROJECT_ID` | `false` | every protected endpoint → **401** |

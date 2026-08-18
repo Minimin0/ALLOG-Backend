@@ -1,56 +1,52 @@
 # Verification Media Storage
 
-이 문서는 Verification media storage의 MVP Backend 계약이다. Product의 MIME, 파일 크기, 보관 기간을 확정하지 않는다.
+이 문서는 Verification media storage의 MVP Backend 계약이다. Product의 MIME, 파일 크기, 업로드 만료, 보관 기간은 확정하지 않는다.
 
 ## 경계
 
 ```text
 Verification
 → unique VerificationMedia
-→ private S3 object
+→ private Gabia local filesystem object
 ```
 
-- Android는 Backend가 발급한 presigned `PUT`으로만 업로드한다.
-- Object key는 `verification-media/{random UUID}` 형식으로 Backend가 생성한다.
-- Client filename, email, 이름, Firebase UID를 object key에 사용하지 않는다.
-- Client가 object key 또는 업로드 성공 여부를 제출 증거로 전달하지 않는다.
-- Backend는 `HeadObject`로 binding, 실제 크기, Content-Type을 확인한 후에만 media confirmation과 `SUBMITTED`를 같은 DB transaction에서 반영한다.
-- S3 network 호출은 pessimistic DB transaction 밖에서 수행한다.
+- `VerificationMediaStorage`가 storage 구현을 숨긴다. Domain/service layer는 local path나 filesystem API를 알지 못한다.
+- Object key는 `verification-media/{random UUID}` 형식으로 Backend가 생성한다. Client filename, email, 이름, Firebase UID는 key에 사용하지 않는다.
+- Android는 authenticated `upload-intent`가 돌려준 `uploadUrl`, `method`, `requiredHeaders`, `expiresAt`만 사용한다. Android는 object key, local path, signing secret, AWS credential을 받지 않는다.
+- Upload URL은 `https://api.allog-app.store`의 signed temporary `PUT`이다. 요청은 nginx와 Spring Boot를 거쳐 private filesystem에 저장된다.
+- Signed grant는 method, opaque id, object key, normalized Content-Type, expected size, expiry를 HMAC-SHA256으로 binding한다. `If-None-Match: *`와 one-time grant consumption으로 public PUT의 overwrite/replay를 차단한다.
+- Backend는 `inspect()`로 binding, actual size, stored content type을 확인한 뒤에만 media confirmation과 `SUBMITTED`를 DB transaction에 반영한다. Client upload success는 제출 증거가 아니다.
+- Storage I/O는 pessimistic DB transaction 밖에서 수행한다.
 
-## Bucket/IAM 운영 요구사항
+## Private filesystem 운영 요구사항
 
-- Bucket과 object는 private이며 S3 Block Public Access를 활성화한다.
-- Presigned upload는 `Content-Type`과 `If-None-Match: *`를 서명한다.
-- Bucket policy에서도 conditional write를 강제해 동일 key overwrite를 막는다.
-- Backend는 AWS default credential provider chain과 EC2 IAM role을 사용한다.
-- IAM은 지정 bucket/prefix의 `s3:PutObject`, `s3:GetObject`와 missing object를 404로 구분하는 데 필요한 prefix-scoped `s3:ListBucket`만 부여한다.
-- Android에는 AWS 장기 credential과 Delete 권한을 제공하지 않는다.
-- Presigned URL 전체, AWS credential, media binary를 application log에 남기지 않는다.
-
-Bucket policy/IaC 자체는 이 repository의 현재 범위가 아니다.
+- Media root는 nginx static content나 public `alias`가 아니어야 한다.
+- Production root `/var/lib/allog/verification-media`는 deployment preflight에서 `allog:allog`, mode `0750`으로 생성한다. Application은 root ownership을 변경하지 않는다.
+- Final object와 metadata는 private permissions로 저장된다. filesystem symlink를 만들 수 있는 주체는 trusted operator/service account로 제한한다.
+- nginx upload route의 `client_max_body_size`는 승인된 `VERIFICATION_MEDIA_MAX_BYTES`와 일치하도록 route-specific으로 설정한다. 값이 확정되기 전에는 숫자를 임의로 설정하지 않는다.
+- Disk capacity, backup/durability, orphan recovery와 retention/delete 기간은 운영 책임이다. local media는 single-host durability를 가진다.
+- In-memory grants는 single application instance를 전제로 한다. process restart는 outstanding grant를 무효화한다.
 
 ## 설정
 
-Media 기능은 기본 비활성화다. 활성화할 때 다음 값을 모두 명시한다.
+Media 기능은 기본 비활성화다. 활성화할 때 다음 값을 모두 environment로 명시한다.
 
 ```text
 VERIFICATION_MEDIA_ENABLED=true
-AWS_REGION
-VERIFICATION_MEDIA_BUCKET
+VERIFICATION_MEDIA_LOCAL_ROOT
+VERIFICATION_MEDIA_LOCAL_BASE_URL
+VERIFICATION_MEDIA_LOCAL_SIGNING_SECRET
 VERIFICATION_MEDIA_MAX_BYTES
 VERIFICATION_MEDIA_UPLOAD_EXPIRY
 VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES
 ```
 
-`VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES`는 `video/mp4,image/jpeg`처럼 explicit MIME을 쉼표로 구분한다. Wildcard는 허용하지 않는다. 예시는 테스트 fixture일 뿐 Product allow-list가 아니다.
+`VERIFICATION_MEDIA_LOCAL_BASE_URL`은 HTTPS public API URL이다. signing secret은 server-only이며 Git, Android, API response와 application log에 포함하지 않는다. `VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES`는 explicit MIME을 쉼표로 구분하며 wildcard/parameter는 허용하지 않는다. 실제 product allow-list와 file size/expiry 값은 별도 Product Decision이다.
 
 ## 미구현 정책
 
-- 실제 binary type/magic-byte 검사
-- multipart upload
-- retry attempt history
-- orphan cleanup scheduler
-- retention/delete 기간
+- retention/delete 기간과 orphan cleanup lifecycle
+- multi-instance shared grant store
 - Video AI 모델 및 callback
 
-향후 Video AI는 public URL이 아니라 Backend IAM read 또는 짧은 signed read URL을 통해 private object를 읽는다.
+Downstream image sanitization/decoder가 실제 image parsing을 fail-closed한다. 향후 provider는 public media URL이 아니라 Backend storage boundary를 통해 private media를 읽어야 한다.

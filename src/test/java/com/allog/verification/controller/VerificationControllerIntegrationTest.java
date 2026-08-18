@@ -70,8 +70,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.driver-class-name=${VERIFICATION_HTTP_TEST_DB_DRIVER:org.h2.Driver}",
         "allog.auth.firebase.enabled=false",
         "allog.verification.media.enabled=true",
-        "allog.verification.media.bucket=test-bucket",
-        "allog.verification.media.region=ap-northeast-2",
+        "allog.verification.media.local-root=${java.io.tmpdir}/allog-verification-media-test",
+        "allog.verification.media.local-base-url=https://api.allog-app.store",
+        "allog.verification.media.local-signing-secret=0123456789abcdef0123456789abcdef",
         "allog.verification.media.max-bytes=1000",
         "allog.verification.media.upload-expiry=5m",
         "allog.verification.media.allowed-content-types=video/mp4,image/jpeg"

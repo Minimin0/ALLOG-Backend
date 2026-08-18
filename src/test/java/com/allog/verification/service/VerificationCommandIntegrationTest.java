@@ -86,8 +86,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.datasource.password=${VERIFICATION_TEST_DB_PASSWORD:}",
         "spring.datasource.driver-class-name=${VERIFICATION_TEST_DB_DRIVER:org.h2.Driver}",
         "allog.verification.media.enabled=true",
-        "allog.verification.media.bucket=test-bucket",
-        "allog.verification.media.region=ap-northeast-2",
+        "allog.verification.media.local-root=${java.io.tmpdir}/allog-verification-media-test",
+        "allog.verification.media.local-base-url=https://api.allog-app.store",
+        "allog.verification.media.local-signing-secret=0123456789abcdef0123456789abcdef",
         "allog.verification.media.max-bytes=1000000",
         "allog.verification.media.upload-expiry=5m",
         "allog.verification.media.allowed-content-types=video/mp4,image/jpeg"

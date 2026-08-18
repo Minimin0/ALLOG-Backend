@@ -10,9 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class VerificationMediaPropertiesTest {
+    private static final String SECRET = "0123456789abcdef0123456789abcdef";
 
     @Test
-    void acceptsExplicitEnabledConfiguration() {
+    void acceptsExplicitEnabledLocalConfiguration() {
         VerificationMediaProperties properties = properties(Set.of("VIDEO/MP4", "image/jpeg"));
 
         assertDoesNotThrow(properties::validateEnabledConfiguration);
@@ -27,20 +28,43 @@ class VerificationMediaPropertiesTest {
         );
         assertThrows(
                 IllegalStateException.class,
-                () -> new VerificationMediaProperties(true, "", "", 0, Duration.ZERO, Set.of())
-                        .validateEnabledConfiguration()
+                () -> new VerificationMediaProperties(
+                        true,
+                        0,
+                        Duration.ZERO,
+                        Set.of(),
+                        "",
+                        "",
+                        ""
+                ).validateEnabledConfiguration()
         );
     }
 
     @Test
-    void disabledConfigurationNeedsNoAwsValues() {
+    void rejectsNonHttpsLocalBaseUrl() {
+        VerificationMediaProperties properties = new VerificationMediaProperties(
+                true,
+                1_000_000,
+                Duration.ofMinutes(5),
+                Set.of("image/jpeg"),
+                "/tmp/allog-verification-media-test",
+                "http://api.allog-app.store",
+                SECRET
+        );
+
+        assertThrows(IllegalStateException.class, properties::validateEnabledConfiguration);
+    }
+
+    @Test
+    void disabledConfigurationNeedsNoStorageValues() {
         VerificationMediaProperties properties = new VerificationMediaProperties(
                 false,
-                "",
-                "",
                 0,
                 Duration.ZERO,
-                Set.of()
+                Set.of(),
+                "",
+                "",
+                ""
         );
 
         assertDoesNotThrow(properties::validateEnabledConfiguration);
@@ -49,11 +73,12 @@ class VerificationMediaPropertiesTest {
     private VerificationMediaProperties properties(Set<String> allowedTypes) {
         return new VerificationMediaProperties(
                 true,
-                "test-bucket",
-                "ap-northeast-2",
                 1_000_000,
                 Duration.ofMinutes(5),
-                allowedTypes
+                allowedTypes,
+                "/tmp/allog-verification-media-test",
+                "https://api.allog-app.store",
+                SECRET
         );
     }
 }
