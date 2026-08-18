@@ -135,8 +135,7 @@ sudo certbot renew --dry-run
 
 nginx 서버블록은 `proxy_pass http://127.0.0.1:8080` 에 `Host` / `X-Real-IP` /
 `X-Forwarded-For` / `X-Forwarded-Proto` 를 넘기면 된다.
-`client_max_body_size` 는 **1m 으로 충분하다** — 사진은 presigned URL 로 S3 에 직접
-올라가므로 nginx 를 통과하지 않는다.
+client_max_body_size must be at least VERIFICATION_MEDIA_MAX_BYTES. Local signed PUT passes through nginx and Spring; production limit is 10 MiB.
 
 ## 새 버전 배포
 
@@ -157,7 +156,7 @@ sudo journalctl -u allog -n 40 --no-pager | grep -E "Flyway|Started|ERROR"
 |---|---|
 | 기동 즉시 `IOException` / `FileNotFoundException` | `FIREBASE_AUTH_ENABLED=true` 인데 JSON 이 없거나 `allog` 계정이 못 읽음 |
 | `FIREBASE_PROJECT_ID is required` | 위와 같은 상황에서 PROJECT_ID 가 빈 값 |
-| `verification media bucket is required` | `VERIFICATION_MEDIA_ENABLED=true` 인데 6개를 다 안 채움 |
+| verification media upload returns 503 | Local media root is absent from the systemd read-write allowlist or local media keys are incomplete |
 | `Access denied for user 'allog_app'` | `.env` 의 `DB_PASSWORD` 불일치 |
 | `SchemaManagementException` | `ddl-auto=validate` 실패. **DB 를 손대지 말고 로그를 먼저 볼 것** |
 | 설정을 고쳤는데 반영이 안 됨 | `.env` 가 CRLF. `grep -c $'\r' /etc/allog/allog.env` 가 0 이어야 한다 |
@@ -170,3 +169,9 @@ MySQL 이 앱과 같은 장비에 있다. 덤프가 없으면 장비 장애 = �
 ```bash
 mysqldump -h 127.0.0.1 -u allog_app -p --single-transaction allog > allog_$(date +%F).sql
 ```
+
+## Verification media storage
+
+Verification media uses Android -> nginx -> Spring -> Gabia private local filesystem, not S3. Spring handles a signed PUT and stores a private object plus sibling metadata under VERIFICATION_MEDIA_LOCAL_ROOT. Filesystem paths, HMAC values, secrets, and media content are not exposed to clients.
+
+VERIFICATION_MEDIA_* is the canonical configuration prefix. With ProtectSystem=strict, the service unit must allow only /var/lib/allog/verification-media through ReadWritePaths. Create the directory as allog:allog with mode 0750. Keep nginx upload limits aligned with VERIFICATION_MEDIA_MAX_BYTES and validate every deployment using fresh upload-intent, signed PUT 204, and metadata persistence.
