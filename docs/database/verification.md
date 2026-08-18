@@ -52,7 +52,7 @@ MVP에서는 예정 기회당 Verification Aggregate 한 행을 유지한다. �
 UNIQUE(group_member_id, routine_schedule_id, scheduled_date)
 ```
 
-현재 구조는 나중에 `VerificationAttempt`가 Aggregate를 FK로 참조하는 확장을 막지 않는다. Attempt 수, 미디어 URL, S3 Key를 Verification에 미리 추가하지 않았다.
+현재 구조는 나중에 `VerificationAttempt`가 Aggregate를 FK로 참조하는 확장을 막지 않는다. Attempt 수, 미디어 URL, storage object key를 Verification에 미리 추가하지 않았다.
 
 ## Timestamp
 

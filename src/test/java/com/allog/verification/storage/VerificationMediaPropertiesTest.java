@@ -41,6 +41,21 @@ class VerificationMediaPropertiesTest {
     }
 
     @Test
+    void rejectsNonHttpsLocalBaseUrl() {
+        VerificationMediaProperties properties = new VerificationMediaProperties(
+                true,
+                1_000_000,
+                Duration.ofMinutes(5),
+                Set.of("image/jpeg"),
+                "/tmp/allog-verification-media-test",
+                "http://api.allog-app.store",
+                SECRET
+        );
+
+        assertThrows(IllegalStateException.class, properties::validateEnabledConfiguration);
+    }
+
+    @Test
     void disabledConfigurationNeedsNoStorageValues() {
         VerificationMediaProperties properties = new VerificationMediaProperties(
                 false,

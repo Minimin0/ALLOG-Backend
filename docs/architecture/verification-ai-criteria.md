@@ -95,7 +95,7 @@ expected reference가 일치할 때만 결과를 반영한다.
 - `framedProperly`: evidence 평가 가능 framing 여부
 - bounded `reasonCode`: observation 완전성/불확실성 표현
 
-Provider boundary에는 TemplateKey, Analysis/Verification/User/Group ID, S3 key나 URL을 보내지 않는다. Criteria의
+Provider boundary에는 TemplateKey, Analysis/Verification/User/Group ID, storage object key나 upload URL을 보내지 않는다. Criteria의
 provider-neutral evidence requirement, modality, normalized Content-Type과 media bytes만 전달한다.
 
 ## MVP DecisionPolicy Product Contract

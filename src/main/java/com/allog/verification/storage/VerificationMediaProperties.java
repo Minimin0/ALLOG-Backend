@@ -78,8 +78,8 @@ public record VerificationMediaProperties(
         }
         try {
             URI uri = URI.create(localBaseUrl);
-            if (!uri.isAbsolute() || uri.getScheme() == null || uri.getHost() == null) {
-                throw new IllegalArgumentException("base URL must be absolute");
+            if (!uri.isAbsolute() || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                throw new IllegalArgumentException("base URL must be absolute HTTPS");
             }
         } catch (IllegalArgumentException exception) {
             throw new IllegalStateException(

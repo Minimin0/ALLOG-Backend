@@ -10,6 +10,7 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -47,6 +48,9 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
     private final URI baseUrl;
     private final byte[] signingSecret;
     private final Map<String, UploadGrantState> grants = new ConcurrentHashMap<>();
+    private final Map<String, String> activeGrantIdsByObjectKey = new ConcurrentHashMap<>();
+    private final Object grantCleanupMonitor = new Object();
+    private Instant nextGrantCleanupAt = Instant.MAX;
 
     public LocalVerificationMediaStorage(VerificationMediaProperties properties, Clock clock) {
         this.properties = Objects.requireNonNull(properties);
@@ -89,7 +93,7 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
                 sizeBytes,
                 expiresAt
         );
-        grants.put(state.id(), state);
+        registerGrant(state);
         return new UploadGrant(
                 baseUrl.resolve(UPLOAD_PATH + state.id()),
                 "PUT",
@@ -115,7 +119,7 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
             throw new UploadException(UploadFailure.INVALID_GRANT);
         }
         if (!clock.instant().isBefore(state.expiresAt())) {
-            grants.remove(opaqueId, state);
+            discardGrant(opaqueId, state);
             throw new UploadException(UploadFailure.EXPIRED_GRANT);
         }
         if (signature == null || !MessageDigest.isEqual(
@@ -135,17 +139,21 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
                 || (contentLength != -1 && contentLength != state.sizeBytes())
                 || (contentLength != -1 && (contentLength <= 0 || contentLength > properties.maxBytes()))
                 || !"*".equals(ifNoneMatch)
-                || !grants.remove(opaqueId, state)) {
+                || !consumeGrant(opaqueId, state)) {
             throw new UploadException(UploadFailure.INVALID_UPLOAD);
         }
         Path target = target(state.objectKey());
         Path metadata = metadata(target);
-        if (Files.exists(target) || Files.exists(metadata)) {
-            throw new UploadException(UploadFailure.OVERWRITE);
-        }
         Path temporary = target.resolveSibling(target.getFileName() + "." + UUID.randomUUID() + ".part");
+        boolean claimed = false;
+        boolean completed = false;
         try {
             Files.createDirectories(target.getParent());
+            if (Files.exists(metadata)) {
+                throw new UploadException(UploadFailure.OVERWRITE);
+            }
+            claimTarget(target);
+            claimed = true;
             long copied;
             try (InputStream input = body; var output = Files.newOutputStream(
                     temporary,
@@ -157,8 +165,9 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
             if (copied != state.sizeBytes()) {
                 throw new UploadException(UploadFailure.INVALID_UPLOAD);
             }
-            moveWithoutReplace(temporary, target);
+            replaceClaimedTarget(temporary, target);
             writeMetadata(metadata, state.contentType(), copied);
+            completed = true;
         } catch (UploadException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -170,8 +179,12 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
         } finally {
             try {
                 Files.deleteIfExists(temporary);
+                if (claimed && !completed) {
+                    Files.deleteIfExists(metadata);
+                    Files.deleteIfExists(target);
+                }
             } catch (IOException ignored) {
-                // The unexposed random partial file may be cleaned operationally.
+                // The unexposed partial state may be cleaned operationally.
             }
         }
     }
@@ -280,6 +293,62 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
         }
     }
 
+    private void registerGrant(UploadGrantState state) {
+        synchronized (grantCleanupMonitor) {
+            cleanupExpiredGrantsLocked(clock.instant());
+            String previousId = activeGrantIdsByObjectKey.put(state.objectKey(), state.id());
+            if (previousId != null) {
+                grants.remove(previousId);
+            }
+            grants.put(state.id(), state);
+            if (state.expiresAt().isBefore(nextGrantCleanupAt)) {
+                nextGrantCleanupAt = state.expiresAt();
+            }
+        }
+    }
+
+    private boolean consumeGrant(String opaqueId, UploadGrantState state) {
+        if (!grants.remove(opaqueId, state)) {
+            return false;
+        }
+        activeGrantIdsByObjectKey.remove(state.objectKey(), opaqueId);
+        return true;
+    }
+
+    private void discardGrant(String opaqueId, UploadGrantState state) {
+        if (grants.remove(opaqueId, state)) {
+            activeGrantIdsByObjectKey.remove(state.objectKey(), opaqueId);
+        }
+    }
+
+    private void cleanupExpiredGrantsLocked(Instant now) {
+        if (now.isBefore(nextGrantCleanupAt)) {
+            return;
+        }
+        grants.forEach((opaqueId, state) -> {
+            if (!now.isBefore(state.expiresAt()) && grants.remove(opaqueId, state)) {
+                activeGrantIdsByObjectKey.remove(state.objectKey(), opaqueId);
+            }
+        });
+        nextGrantCleanupAt = grants.values().stream()
+                .map(UploadGrantState::expiresAt)
+                .min(Instant::compareTo)
+                .orElse(Instant.MAX);
+    }
+
+    int outstandingGrantCount() {
+        return grants.size();
+    }
+
+    private void claimTarget(Path target) throws IOException {
+        try {
+            Files.createFile(target);
+            restrictPermissions(target);
+        } catch (FileAlreadyExistsException exception) {
+            throw new UploadException(UploadFailure.OVERWRITE);
+        }
+    }
+
     private static long copyExactly(InputStream input, OutputStream output, long expectedBytes)
             throws IOException {
         byte[] buffer = new byte[8 * 1024];
@@ -298,11 +367,11 @@ public final class LocalVerificationMediaStorage implements VerificationMediaSto
         return copied;
     }
 
-    private void moveWithoutReplace(Path source, Path target) throws IOException {
+    private void replaceClaimedTarget(Path source, Path target) throws IOException {
         try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target);
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
