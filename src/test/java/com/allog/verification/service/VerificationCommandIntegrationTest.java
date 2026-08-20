@@ -225,14 +225,14 @@ class VerificationCommandIntegrationTest {
     }
 
     @Test
-    void flywayHasExactlyV1ThroughV17() {
+    void flywayHasExactlyV1ThroughV18() {
         assertAll(
-                () -> assertEquals(17, jdbcTemplate.queryForObject(
+                () -> assertEquals(18, jdbcTemplate.queryForObject(
                         "select count(*) from flyway_schema_history where success = true and version is not null",
                         Integer.class
                 )),
                 () -> assertEquals(1, jdbcTemplate.queryForObject(
-                        "select count(*) from flyway_schema_history where version = '17'",
+                        "select count(*) from flyway_schema_history where version = '18'",
                         Integer.class
                 ))
         );

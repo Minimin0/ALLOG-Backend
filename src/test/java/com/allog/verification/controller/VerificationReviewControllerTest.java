@@ -1,7 +1,7 @@
 package com.allog.verification.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.verification.analysis.domain.AnalysisRecommendation;
 import com.allog.verification.domain.Verification;
 import com.allog.verification.domain.VerificationStatus;
@@ -38,7 +38,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
-        "allog.auth.firebase.enabled=false",
         "allog.verification.analysis.operations.operator-user-ids=7"
 })
 @AutoConfigureMockMvc
@@ -170,7 +169,7 @@ class VerificationReviewControllerTest {
             MockHttpServletRequestBuilder request,
             Long userId
     ) {
-        return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return request.with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(userId)
         )));
     }

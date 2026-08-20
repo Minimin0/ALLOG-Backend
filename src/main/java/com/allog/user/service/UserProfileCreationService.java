@@ -24,7 +24,7 @@ import java.util.Objects;
  * "today" means.
  *
  * <p>Separate from {@link UserProfileService} and {@code REQUIRES_NEW} for the same reason
- * {@code UserIdentityCreationService} is: when the unique key rejects a second concurrent create,
+ * local account creation is: when the unique key rejects a second concurrent create,
  * only this inner transaction is marked rollback-only, leaving the caller able to query what
  * actually happened and answer 409 instead of 500.
  */

@@ -2,6 +2,7 @@ package com.allog.ai.coaching.production;
 
 import com.allog.ai.coaching.domain.ActionType;
 import com.allog.ai.coaching.domain.GenerationType;
+import com.allog.ai.coaching.domain.FollowUpQuestion;
 import com.allog.ai.coaching.domain.InsightType;
 import com.allog.ai.coaching.domain.RoutineState;
 import com.allog.ai.coaching.dto.AiCoachResult;
@@ -100,6 +101,45 @@ class ProductionAiCoachApplicationServiceTest {
         assertNull(input.getValue().previousChallengeCompletionRate());
         assertEquals(deadline, input.getValue().certificationDeadline());
         assertFalse(input.getValue().challengeCompleted());
+        assertEquals(GroupMemberStatus.ACTIVE, result.participationStatus());
+    }
+
+    @Test
+    void forwardsPresetQuestionWithProductionProgressFacts() {
+        PersonalProgressFacts personal = new PersonalProgressFacts(
+                false, false, false, 2, 5, 1, 0, 4, 0, Optional.empty(), GroupMemberStatus.ACTIVE
+        );
+        GroupProgressFacts group = new GroupProgressFacts(2, 4, 10, 0.4, 0, 2);
+        when(queryService.load(GROUP_ID, USER_ID))
+                .thenReturn(ProductionAiCoachFacts.active("아침 물 마시기", personal, group));
+        when(aiCoachApplicationService.generateFollowUp(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(FollowUpQuestion.NEXT_ACTION)
+        )).thenReturn(new AiCoachResult(
+                "다음 행동",
+                "오늘 인증을 제출해 주세요.",
+                InsightType.TODAY_NOT_COMPLETED,
+                RoutineState.ATTENTION,
+                ActionType.OPEN_CERTIFICATION,
+                "인증하기",
+                GenerationType.AI
+        ));
+
+        ProductionAiCoachResult result = service.generateFollowUpFor(
+                GROUP_ID,
+                USER_ID,
+                FollowUpQuestion.NEXT_ACTION
+        );
+
+        ArgumentCaptor<ProgressAnalysisInput> input = ArgumentCaptor.forClass(ProgressAnalysisInput.class);
+        verify(aiCoachApplicationService).generateFollowUp(
+                org.mockito.ArgumentMatchers.eq("아침 물 마시기"),
+                input.capture(),
+                org.mockito.ArgumentMatchers.eq(FollowUpQuestion.NEXT_ACTION)
+        );
+        assertEquals(2, input.getValue().completedCount());
+        assertEquals(0.4, input.getValue().groupCompletionRate());
         assertEquals(GroupMemberStatus.ACTIVE, result.participationStatus());
     }
 

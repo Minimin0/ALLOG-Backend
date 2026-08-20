@@ -1,7 +1,7 @@
 package com.allog.group.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -247,7 +247,7 @@ class RoutineGroupJoinIntegrationTest {
             Long userId
     ) {
         return post("/api/v1/groups/{groupId}/join", groupId)
-                .with(authentication(FirebaseBearerAuthenticationToken.authenticated(new AllogPrincipal(userId))));
+                .with(authentication(AllogAuthenticationToken.authenticated(new AllogPrincipal(userId))));
     }
 
     private Fixture fixture(int maxMembers, RoutineGroupStatus status, boolean verificationBound) {

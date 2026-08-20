@@ -1,7 +1,7 @@
 package com.allog.progress.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.progress.dto.ProgressResponse;
 import com.allog.progress.service.ProgressNotFoundException;
@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class ProgressControllerTest {
@@ -84,7 +84,7 @@ class ProgressControllerTest {
     @ValueSource(longs = {0, -1})
     void nonPositiveGroupIdReturns400WithoutCallingService(long groupId) throws Exception {
         mockMvc.perform(get("/api/v1/me/groups/{groupId}/progress", groupId)
-                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                        .with(authentication(AllogAuthenticationToken.authenticated(
                                 new AllogPrincipal(USER_ID)
                         ))))
                 .andExpect(status().isBadRequest())
@@ -127,7 +127,7 @@ class ProgressControllerTest {
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder authenticatedGet() {
-        return get(ENDPOINT).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return get(ENDPOINT).with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID)
         )));
     }

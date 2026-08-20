@@ -1,13 +1,11 @@
 package com.allog.auth.config;
 
-import com.allog.auth.security.FirebaseAuthenticationProvider;
-import com.allog.auth.security.FirebaseBearerAuthenticationFilter;
+import com.allog.auth.security.AccessTokenService;
+import com.allog.auth.security.LocalBearerAuthenticationFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -20,17 +18,11 @@ import org.springframework.security.web.savedrequest.NullRequestCache;
 public class SecurityConfiguration {
 
     @Bean
-    AuthenticationManager authenticationManager(FirebaseAuthenticationProvider authenticationProvider) {
-        return new ProviderManager(authenticationProvider);
-    }
-
-    @Bean
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            AuthenticationManager authenticationManager
+            AccessTokenService tokenService
     ) throws Exception {
-        FirebaseBearerAuthenticationFilter firebaseFilter =
-                new FirebaseBearerAuthenticationFilter(authenticationManager);
+        LocalBearerAuthenticationFilter authenticationFilter = new LocalBearerAuthenticationFilter(tokenService);
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -44,10 +36,11 @@ public class SecurityConfiguration {
                         (request, response, exception) -> response.setStatus(HttpServletResponse.SC_UNAUTHORIZED)
                 ))
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/signup").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/dev/ai-coach/preview").permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/verification-media/uploads/*").permitAll()
                         .anyRequest().authenticated())
-                .addFilterBefore(firebaseFilter, AnonymousAuthenticationFilter.class);
+                .addFilterBefore(authenticationFilter, AnonymousAuthenticationFilter.class);
         return http.build();
     }
 }

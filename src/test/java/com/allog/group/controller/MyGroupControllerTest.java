@@ -1,7 +1,7 @@
 package com.allog.group.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
 import com.allog.group.domain.GroupVisibility;
@@ -44,7 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class MyGroupControllerTest {
@@ -212,14 +212,14 @@ class MyGroupControllerTest {
     }
 
     private MockHttpServletRequestBuilder authenticatedGet() {
-        return get(ENDPOINT).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return get(ENDPOINT).with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID)
         )));
     }
 
     private MockHttpServletRequestBuilder authenticatedDetailGet(long groupId) {
         return get(ENDPOINT + "/{groupId}", groupId).with(authentication(
-                FirebaseBearerAuthenticationToken.authenticated(new AllogPrincipal(USER_ID))
+                AllogAuthenticationToken.authenticated(new AllogPrincipal(USER_ID))
         ));
     }
 }

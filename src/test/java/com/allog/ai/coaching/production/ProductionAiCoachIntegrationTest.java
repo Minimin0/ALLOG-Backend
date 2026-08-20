@@ -8,7 +8,7 @@ import com.allog.ai.coaching.dto.AiCoachText;
 import com.allog.ai.coaching.dto.CoachContext;
 import com.allog.ai.coaching.provider.AiCoachProvider;
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -135,7 +135,7 @@ class ProductionAiCoachIntegrationTest {
         Fixture fixture = activeFixture(GroupMemberStatus.JOINED);
 
         mockMvc.perform(get("/api/v1/groups/{groupId}/ai-coach", fixture.groupId())
-                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                        .with(authentication(AllogAuthenticationToken.authenticated(
                                 new AllogPrincipal(fixture.members().getFirst().userId())
                         ))))
                 .andExpect(status().isOk())
@@ -155,7 +155,7 @@ class ProductionAiCoachIntegrationTest {
         mockMvc.perform(get("/api/v1/groups/{groupId}/ai-coach", fixture.groupId())
                         .queryParam("userId", fixture.members().getFirst().userId().toString())
                         .header("X-User-Id", fixture.members().getFirst().userId())
-                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                        .with(authentication(AllogAuthenticationToken.authenticated(
                                 new AllogPrincipal(999999L)
                         ))))
                 .andExpect(status().isNotFound());

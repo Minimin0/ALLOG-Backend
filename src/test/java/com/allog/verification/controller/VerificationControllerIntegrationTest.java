@@ -1,7 +1,7 @@
 package com.allog.verification.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -68,7 +68,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=${VERIFICATION_HTTP_TEST_DB_USERNAME:sa}",
         "spring.datasource.password=${VERIFICATION_HTTP_TEST_DB_PASSWORD:}",
         "spring.datasource.driver-class-name=${VERIFICATION_HTTP_TEST_DB_DRIVER:org.h2.Driver}",
-        "allog.auth.firebase.enabled=false",
         "allog.verification.media.enabled=true",
         "allog.verification.media.local-root=${java.io.tmpdir}/allog-verification-media-test",
         "allog.verification.media.local-base-url=https://api.allog-app.store",
@@ -344,7 +343,7 @@ class VerificationControllerIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder authenticatedPost(String endpoint, Long userId) {
-        return post(endpoint).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return post(endpoint).with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(userId)
         )));
     }

@@ -39,7 +39,7 @@ public final class AiCoachService {
         CoachAction action = actionResolver.resolve(context);
         long startedAt = System.nanoTime();
 
-        if (context.insight() == null || context.progress().challengeCompleted()) {
+        if (context.followUp() == null && (context.insight() == null || context.progress().challengeCompleted())) {
             return result(
                     context,
                     action,

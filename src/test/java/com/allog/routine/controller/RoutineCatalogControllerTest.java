@@ -1,7 +1,7 @@
 package com.allog.routine.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Group creation takes a {@code routineDefinitionId}. Before V17 the table was empty and nothing
  * exposed it, so a client had no id to send — these are the two halves of that fix.
  */
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class RoutineCatalogControllerTest {
@@ -57,7 +57,7 @@ class RoutineCatalogControllerTest {
     @Test
     void listsTheCatalogueWithTheIdGroupCreationTakes() throws Exception {
         mockMvc.perform(get(ROUTINES).with(authentication(
-                        FirebaseBearerAuthenticationToken.authenticated(new AllogPrincipal(42L)))))
+                        AllogAuthenticationToken.authenticated(new AllogPrincipal(42L)))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].routineDefinitionId").isNumber())
                 .andExpect(jsonPath("$.items[0].routineKey").value("HYDRATION"))

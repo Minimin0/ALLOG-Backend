@@ -2,10 +2,13 @@ package com.allog.ai.coaching.controller;
 
 import com.allog.ai.coaching.production.ProductionAiCoachApplicationService;
 import com.allog.auth.security.AllogPrincipal;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,5 +28,18 @@ public class ProductionAiCoachController {
             @AuthenticationPrincipal AllogPrincipal principal
     ) {
         return ProductionAiCoachResponse.from(applicationService.generateFor(groupId, principal.userId()));
+    }
+
+    @PostMapping("/{groupId}/ai-coach/follow-up")
+    public ProductionAiCoachResponse followUp(
+            @Positive @PathVariable Long groupId,
+            @Valid @RequestBody AiCoachFollowUpRequest request,
+            @AuthenticationPrincipal AllogPrincipal principal
+    ) {
+        return ProductionAiCoachResponse.from(applicationService.generateFollowUpFor(
+                groupId,
+                principal.userId(),
+                request.questionId()
+        ));
     }
 }

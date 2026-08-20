@@ -2,6 +2,7 @@ package com.allog.ai.coaching.production;
 
 import com.allog.ai.coaching.domain.ActionType;
 import com.allog.ai.coaching.domain.GenerationType;
+import com.allog.ai.coaching.domain.FollowUpQuestion;
 import com.allog.ai.coaching.domain.RoutineState;
 import com.allog.ai.coaching.dto.AiCoachResult;
 import com.allog.ai.coaching.dto.ProgressAnalysisInput;
@@ -34,6 +35,23 @@ public class ProductionAiCoachApplicationService {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ProductionAiCoachResult generateFor(Long groupId, Long currentUserId) {
+        return generate(groupId, currentUserId, null);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ProductionAiCoachResult generateFollowUpFor(
+            Long groupId,
+            Long currentUserId,
+            FollowUpQuestion question
+    ) {
+        return generate(groupId, currentUserId, Objects.requireNonNull(question, "question must not be null"));
+    }
+
+    private ProductionAiCoachResult generate(
+            Long groupId,
+            Long currentUserId,
+            FollowUpQuestion question
+    ) {
         ProductionAiCoachFacts facts = queryService.load(groupId, currentUserId);
         return switch (facts.participationStatus()) {
             case JOINED -> template(
@@ -44,7 +62,7 @@ public class ProductionAiCoachApplicationService {
                     ActionType.OPEN_GROUP,
                     "그룹 현황 보기"
             );
-            case ACTIVE -> active(facts);
+            case ACTIVE -> active(facts, question);
             case COMPLETED -> template(
                     "챌린지를 완료했어요",
                     "완료한 진행 기록을 확인해 보세요.",
@@ -65,7 +83,7 @@ public class ProductionAiCoachApplicationService {
         };
     }
 
-    private ProductionAiCoachResult active(ProductionAiCoachFacts facts) {
+    private ProductionAiCoachResult active(ProductionAiCoachFacts facts, FollowUpQuestion question) {
         PersonalProgressFacts personal = facts.personalProgress().orElseThrow();
         GroupProgressFacts group = facts.groupProgress().orElseThrow();
         ProgressAnalysisInput input = new ProgressAnalysisInput(
@@ -83,7 +101,9 @@ public class ProductionAiCoachApplicationService {
                 personal.certificationDeadline().orElse(null),
                 false
         );
-        AiCoachResult result = aiCoachApplicationService.generate(facts.challengeName(), input);
+        AiCoachResult result = question == null
+                ? aiCoachApplicationService.generate(facts.challengeName(), input)
+                : aiCoachApplicationService.generateFollowUp(facts.challengeName(), input, question);
         return ProductionAiCoachResult.active(result);
     }
 

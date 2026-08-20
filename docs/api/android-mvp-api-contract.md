@@ -1,13 +1,13 @@
 # ALLOG Android MVP API Contract
 
-Extracted from the code on `main` @ `2a8db59`. Where this document and the code disagree, the code
-wins — every field below was read out of a controller or DTO, not from a design note.
+Extracted from the production code on this branch. Where this document and the code disagree, the
+code wins — every field below was read out of a controller or DTO, not from a design note.
 
 ## Base
 
 - **Base path**: `/api/v1`
 - **Content-Type**: `application/json` (request and response)
-- **Auth**: `Authorization: Bearer <Firebase ID Token>` on every endpoint below
+- **Auth**: `Authorization: Bearer <ALLOG Access Token>` on every endpoint below
 - **Dates/times**: `LocalDate` → `"2026-08-16"`, `LocalTime` → `"23:00:00"`, `Instant` → ISO-8601 UTC
 - **Enums on the wire**: group/verification enums are **UPPERCASE** (`RECRUITING`, `APPROVED`).
   Profile and onboarding enums are **lower_snake_case** (`female`, `fact_based`, `hydration`) — this
@@ -28,17 +28,17 @@ Treat "409 with no body" and "409 with a code" as different cases in the client.
 
 ## Auth
 
-Firebase ID token in `Authorization: Bearer …`. The backend verifies it, maps the Firebase UID to an
-internal user, and **creates that user on first authenticated request** — there is no signup call.
+ALLOG access token in `Authorization: Bearer …`. The backend verifies its signature and expiry, then
+maps its numeric subject to the internal user.
 
 - Missing/invalid/expired token → **401** (empty body)
-- Firebase unreachable → **503**
-- Only `POST /api/v1/dev/ai-coach/preview` is unauthenticated, and it is a dev-profile endpoint
+- `POST /api/v1/auth/signup` creates a lowercase local login ID and returns an access token
+- `POST /api/v1/auth/login` verifies the BCrypt password and returns an access token
+- Auth endpoints and `POST /api/v1/dev/ai-coach/preview` are unauthenticated
 
-**ANDROID NOTES**: a fresh Firebase user is authenticated but has **no profile**. `GET /users/me`
+**ANDROID NOTES**: a fresh local account is authenticated but has **no profile**. `GET /users/me`
 answers 404 until onboarding completes — that 404 is the "show onboarding" signal, not an error.
-Locally with `allog.auth.firebase.enabled=false`, every protected endpoint returns 401; that is
-expected, not a bug.
+Local startup requires `ALLOG_AUTH_TOKEN_SECRET` with at least 32 bytes.
 
 ---
 
@@ -311,10 +311,28 @@ starts, or after it ends, only `participationStatus` is populated — bind them 
 ```json
 { "title": "…", "message": "…", "participationStatus": "ACTIVE",
   "insightType": "DEADLINE_APPROACHING", "routineState": "ATTENTION",
-  "actionType": "OPEN_CERTIFICATION", "actionLabel": "인증하기", "generationType": "TEMPLATE" }
+  "actionType": "OPEN_CERTIFICATION", "actionLabel": "인증하기", "generationType": "TEMPLATE",
+  "suggestedQuestions": [
+    { "id": "PACE_CHECK", "label": "지금 페이스 어때요?" },
+    { "id": "NEXT_ACTION", "label": "지금 가장 중요한 건 뭐예요?" },
+    { "id": "GROUP_PROGRESS", "label": "우리 그룹은 잘하고 있나요?" }
+  ] }
 ```
 `generationType` tells you whether the copy came from the model or the template fallback. The
 service always answers — a provider failure degrades to a template rather than erroring.
+`suggestedQuestions` contains these three backend-owned presets for `ACTIVE` participation and is
+an empty array for every other lifecycle status.
+
+### `POST /api/v1/groups/{groupId}/ai-coach/follow-up`
+**AUTH** required · **200** · **404** if not a member of the group
+```json
+{ "questionId": "PACE_CHECK" }
+```
+The response has the same shape as the GET response above. `questionId` must be one of
+`PACE_CHECK`, `NEXT_ACTION`, or `GROUP_PROGRESS`; missing or unknown values return **400**. The
+client cannot send free-form question text. The selected id is converted to a backend-owned trusted
+instruction and combined with current backend progress facts. Provider failure is still a **200**
+with `generationType: "TEMPLATE"`; follow-ups are transient and are not persisted.
 
 **Do not call** `POST /api/v1/dev/ai-coach/preview`: it is a dev-profile-only, unauthenticated
 preview and is not present in a normal deployment.
@@ -330,6 +348,6 @@ These are configuration, not code, and are **not provisioned yet**:
 | Verification media (private local storage) | `VERIFICATION_MEDIA_ENABLED`, `VERIFICATION_MEDIA_LOCAL_ROOT`, `VERIFICATION_MEDIA_LOCAL_BASE_URL`, `VERIFICATION_MEDIA_LOCAL_SIGNING_SECRET`, `VERIFICATION_MEDIA_ALLOWED_CONTENT_TYPES` | `false` | `upload-intent` / `submit` → **503** |
 | AI verification analysis | `VERIFICATION_ANALYSIS_ANTHROPIC_ENABLED`, `ANTHROPIC_API_KEY` | `false` | submitted verifications stay pending until an operator decides |
 | AI coach copy | `OPENAI_API_KEY` | empty | coach answers with `generationType: TEMPLATE` |
-| Firebase auth | `FIREBASE_AUTH_ENABLED`, `FIREBASE_PROJECT_ID` | `false` | every protected endpoint → **401** |
+| ALLOG auth | `ALLOG_AUTH_TOKEN_SECRET`, `ALLOG_AUTH_TOKEN_TTL` | no secret, `24h` | startup fails without a 32-byte secret |
 
 Everything else works against the local profile today.

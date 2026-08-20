@@ -4,6 +4,7 @@ import com.allog.ai.coaching.analyzer.ProgressAnalyzer;
 import com.allog.ai.coaching.detector.ProgressInsightDetector;
 import com.allog.ai.coaching.domain.ActionType;
 import com.allog.ai.coaching.domain.GenerationType;
+import com.allog.ai.coaching.domain.FollowUpQuestion;
 import com.allog.ai.coaching.domain.InsightType;
 import com.allog.ai.coaching.domain.RoutineState;
 import com.allog.ai.coaching.dto.AiCoachResult;
@@ -23,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -122,6 +124,46 @@ class AiCoachApplicationServiceTest {
         assertAll(
                 () -> assertEquals(InsightType.DEADLINE_APPROACHING, result.insightType()),
                 () -> assertEquals(GenerationType.TEMPLATE, result.generationType())
+        );
+    }
+
+    @Test
+    void mapsPresetQuestionToTrustedIntentAndExistingProgressFacts() {
+        AtomicReference<CoachContext> captured = new AtomicReference<>();
+        AiCoachResult result = application(context -> {
+            captured.set(context);
+            return new AiCoachText("페이스", "진행 상태");
+        }).generateFollowUp(
+                "물 마시기",
+                input(false, false, 3, 5, 5, 0.8, null, false),
+                FollowUpQuestion.PACE_CHECK
+        );
+
+        assertAll(
+                () -> assertEquals("PACE_CHECK", captured.get().followUp().id()),
+                () -> assertEquals(FollowUpQuestion.PACE_CHECK.instruction(), captured.get().followUp().instruction()),
+                () -> assertEquals(0.6, captured.get().progress().completionRate()),
+                () -> assertEquals(0.8, captured.get().group().completionRate()),
+                () -> assertEquals(GenerationType.AI, result.generationType())
+        );
+    }
+
+    @Test
+    void followUpProviderFailureReturnsDeterministicTemplate() {
+        AiCoachProvider provider = context -> {
+            throw new AiProviderException(AiProviderException.Category.CONNECTION, "failed");
+        };
+
+        AiCoachResult result = application(provider).generateFollowUp(
+                "물 마시기",
+                input(false, false, 3, 5, 5, 0.8, null, false),
+                FollowUpQuestion.GROUP_PROGRESS
+        );
+
+        assertAll(
+                () -> assertEquals(GenerationType.TEMPLATE, result.generationType()),
+                () -> assertEquals("그룹 진행 상태예요", result.title()),
+                () -> assertEquals("우리 그룹은 공동 목표의 80%를 완료했어요.", result.message())
         );
     }
 

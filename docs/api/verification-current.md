@@ -1,6 +1,6 @@
 # Current Verification API
 
-모든 endpoint는 Firebase 인증으로 생성된 `AllogPrincipal`이 필요하다. Client가 보낸 `userId`, member ID, Firebase UID는 인증 정보로 사용하지 않는다.
+모든 endpoint는 ALLOG access token으로 생성된 `AllogPrincipal`이 필요하다. Client가 보낸 `userId`나 member ID는 인증 정보로 사용하지 않는다.
 
 ## Android 호출 순서
 
@@ -55,7 +55,7 @@ Content-Type: application/json
 }
 ```
 
-응답은 `Cache-Control: no-store`다. `requiredHeaders`의 모든 값을 signed PUT에 그대로 적용해야 한다. `uploadUrl`과 signature는 임시 credential이므로 Android와 Backend 모두 전체 URL을 log에 남기지 않는다. Object key와 private storage path는 public contract가 아니다. Signed PUT URL 자체는 grant가 security boundary이므로 Firebase bearer token을 요구하지 않는다.
+응답은 `Cache-Control: no-store`다. `requiredHeaders`의 모든 값을 signed PUT에 그대로 적용해야 한다. `uploadUrl`과 signature는 임시 credential이므로 Android와 Backend 모두 전체 URL을 log에 남기지 않는다. Object key와 private storage path는 public contract가 아니다. Signed PUT URL 자체는 grant가 security boundary이므로 bearer token을 요구하지 않는다.
 
 ## Submit
 

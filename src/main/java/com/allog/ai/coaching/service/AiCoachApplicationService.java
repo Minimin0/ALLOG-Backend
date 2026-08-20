@@ -3,6 +3,7 @@ package com.allog.ai.coaching.service;
 import com.allog.ai.coaching.analyzer.ProgressAnalyzer;
 import com.allog.ai.coaching.detector.ProgressInsightDetector;
 import com.allog.ai.coaching.domain.ProgressInsight;
+import com.allog.ai.coaching.domain.FollowUpQuestion;
 import com.allog.ai.coaching.domain.RoutineState;
 import com.allog.ai.coaching.dto.AiCoachResult;
 import com.allog.ai.coaching.dto.CoachContext;
@@ -46,11 +47,30 @@ public final class AiCoachApplicationService {
     }
 
     public AiCoachResult generate(String challengeName, ProgressAnalysisInput input) {
+        return generate(challengeName, input, null);
+    }
+
+    public AiCoachResult generateFollowUp(
+            String challengeName,
+            ProgressAnalysisInput input,
+            FollowUpQuestion question
+    ) {
+        return generate(challengeName, input, Objects.requireNonNull(question, "question must not be null"));
+    }
+
+    private AiCoachResult generate(
+            String challengeName,
+            ProgressAnalysisInput input,
+            FollowUpQuestion question
+    ) {
         ProgressSnapshot snapshot = analyzer.analyze(input, policy, clock);
         List<ProgressInsight> insights = detector.detect(snapshot, policy);
         Optional<ProgressInsight> selectedInsight = selector.select(insights);
         RoutineState routineState = stateResolver.resolve(snapshot, insights);
         CoachContext context = CoachContext.from(challengeName, snapshot, selectedInsight, routineState);
+        if (question != null) {
+            context = context.withFollowUp(question);
+        }
         return coachService.generate(context);
     }
 }

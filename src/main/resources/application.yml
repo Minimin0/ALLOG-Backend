@@ -19,9 +19,9 @@ ai:
     timeout: "${AI_COACH_TIMEOUT:3s}"
 allog:
   auth:
-    firebase:
-      enabled: "${FIREBASE_AUTH_ENABLED:false}"
-      project-id: "${FIREBASE_PROJECT_ID:}"
+    token:
+      secret: "${ALLOG_AUTH_TOKEN_SECRET:}"
+      ttl: "${ALLOG_AUTH_TOKEN_TTL:24h}"
   group:
     lifecycle:
       enabled: "${GROUP_LIFECYCLE_ENABLED:true}"
