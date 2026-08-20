@@ -31,12 +31,22 @@ public class AuthExceptionHandler {
         return response(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "아이디 또는 비밀번호가 올바르지 않아요.", List.of());
     }
 
-    @ExceptionHandler(LoginRateLimiter.LimitExceededException.class)
-    ResponseEntity<ApiErrorResponse> loginRateLimited(LoginRateLimiter.LimitExceededException ignored) {
+    @ExceptionHandler(LoginRateLimiter.LoginLimitExceededException.class)
+    ResponseEntity<ApiErrorResponse> loginRateLimited(LoginRateLimiter.LoginLimitExceededException ignored) {
         return response(
                 HttpStatus.TOO_MANY_REQUESTS,
                 "LOGIN_RATE_LIMITED",
                 "로그인 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.",
+                List.of()
+        );
+    }
+
+    @ExceptionHandler(LoginRateLimiter.SignupLimitExceededException.class)
+    ResponseEntity<ApiErrorResponse> signupRateLimited(LoginRateLimiter.SignupLimitExceededException ignored) {
+        return response(
+                HttpStatus.TOO_MANY_REQUESTS,
+                "SIGNUP_RATE_LIMITED",
+                "회원가입 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.",
                 List.of()
         );
     }
