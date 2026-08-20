@@ -9,14 +9,14 @@ Ubuntu 22.04 + MySQL 8 동거 + systemd 기준. 실제로 이 순서로 서버�
 | `allog.env.template` | 서버 환경변수 전체. 값을 채워 `/etc/allog/allog.env` 로 둔다 |
 | `systemd/allog.service` | systemd 유닛. 시크릿 없음 |
 
-**값이 채워진 `allog.env` 와 Firebase 서비스 계정 JSON 은 저장소에 두지 않는다.**
+**값이 채워진 `allog.env`는 저장소에 두지 않는다.**
 `.gitignore` 가 막고 있지만, 규칙보다 습관이 먼저다.
 
 ## 서버가 요구하는 것
 
 ```
 Java 21            fat jar 126MB 를 java -jar 로 실행
-MySQL 8 / InnoDB   기동 시 Flyway V1→V17 자동 적용, ddl-auto=validate 검사
+MySQL 8 / InnoDB   기동 시 Flyway V1→V18 자동 적용, ddl-auto=validate 검사
 RAM                4GB 권장 (MySQL 동거 기준). JVM 힙은 1g 로 제한한다
 포트               8080. 리버스 프록시 뒤에 두고 127.0.0.1 에만 바인딩한다
 ```
@@ -69,8 +69,8 @@ sudo chown allog:allog /opt/allog/app.jar && sudo chmod 644 /opt/allog/app.jar
 
 ### 4. 첫 기동은 포그라운드로
 
-서비스로 감싸기 전에 로그를 눈으로 본다. **이때는 `FIREBASE_AUTH_ENABLED=false` 로 둔다** —
-DB 문제인지 Firebase 문제인지 섞이지 않게 한다.
+서비스로 감싸기 전에 로그를 눈으로 본다. `ALLOG_AUTH_TOKEN_SECRET`에는 32 bytes 이상의
+배포 환경 전용 무작위 값을 설정한다. 누락하거나 짧으면 기동이 실패하는 것이 정상이다.
 
 ```bash
 sudo -u allog bash -c 'set -a; . /etc/allog/allog.env; set +a; exec java -Xmx1g -XX:MaxMetaspaceSize=256m -jar /opt/allog/app.jar'
@@ -79,7 +79,7 @@ sudo -u allog bash -c 'set -a; . /etc/allog/allog.env; set +a; exec java -Xmx1g 
 성공 신호:
 
 ```
-Successfully applied 17 migrations to schema `allog`
+Successfully applied 18 migrations to schema `allog`
 Tomcat started on port 8080 (http)
 Started AllogApplication in N seconds
 ```
@@ -92,13 +92,11 @@ mysql -h 127.0.0.1 -u allog_app -p -N -B -e \
   "SELECT MAX(CAST(version AS UNSIGNED)), COUNT(*), SUM(success=0) FROM flyway_schema_history;" allog
 ```
 
-### 5. Firebase
+### 5. 인증 smoke test
 
-서비스 계정 JSON 을 `/etc/allog/firebase-service-account.json` 에 두고 `600`, `allog:allog`.
-그다음 `FIREBASE_AUTH_ENABLED=true` 로 바꾸고 재기동한다.
-
-JSON 의 `project_id` 는 프론트 `EXPO_PUBLIC_FIREBASE_PROJECT_ID` 와 **같은 프로젝트여야 한다.**
-다르면 "로그인은 되는데 서버가 401" 이라는 가장 헷갈리는 증상이 나온다.
+`POST /api/v1/auth/signup`과 `/login`이 access token을 반환하고, 그 token으로 보호 API가
+401이 아닌 응답을 내는지 확인한다. 실제 ID, password, token, signing secret은 shell history나
+배포 로그에 남기지 않는다.
 
 ### 6. systemd
 
@@ -154,8 +152,7 @@ sudo journalctl -u allog -n 40 --no-pager | grep -E "Flyway|Started|ERROR"
 
 | 증상 | 원인 |
 |---|---|
-| 기동 즉시 `IOException` / `FileNotFoundException` | `FIREBASE_AUTH_ENABLED=true` 인데 JSON 이 없거나 `allog` 계정이 못 읽음 |
-| `FIREBASE_PROJECT_ID is required` | 위와 같은 상황에서 PROJECT_ID 가 빈 값 |
+| `ALLOG_AUTH_TOKEN_SECRET must be at least 32 bytes` | signing secret이 없거나 너무 짧음 |
 | verification media upload returns 503 | Local media root is absent from the systemd read-write allowlist or local media keys are incomplete |
 | `Access denied for user 'allog_app'` | `.env` 의 `DB_PASSWORD` 불일치 |
 | `SchemaManagementException` | `ddl-auto=validate` 실패. **DB 를 손대지 말고 로그를 먼저 볼 것** |

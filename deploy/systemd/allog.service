@@ -7,7 +7,6 @@
 # 전제:
 #   /opt/allog/app.jar                        644 allog:allog
 #   /etc/allog/allog.env                      600 allog:allog   (deploy/allog.env.template 참고)
-#   /etc/allog/firebase-service-account.json  600 allog:allog   (Firebase 인증을 켤 때만)
 #   useradd --system --no-create-home --shell /usr/sbin/nologin allog
 #
 # 이 파일에는 시크릿이 없다. 값은 전부 EnvironmentFile 에서 온다.

@@ -11,12 +11,12 @@ class UserIdentityTest {
         User user = User.create();
 
         assertThrows(NullPointerException.class,
-                () -> new UserIdentity(null, IdentityProvider.FIREBASE, "firebase-user-123"));
-        assertThrows(NullPointerException.class,
-                () -> new UserIdentity(user, null, "firebase-user-123"));
+                () -> UserIdentity.local(null, "local-user-123", "hash"));
         assertThrows(IllegalArgumentException.class,
-                () -> new UserIdentity(user, IdentityProvider.FIREBASE, null));
+                () -> UserIdentity.local(user, null, "hash"));
         assertThrows(IllegalArgumentException.class,
-                () -> new UserIdentity(user, IdentityProvider.FIREBASE, " "));
+                () -> UserIdentity.local(user, " ", "hash"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UserIdentity.local(user, "local-user-123", " "));
     }
 }

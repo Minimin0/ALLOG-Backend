@@ -44,6 +44,9 @@ public class UserIdentity {
     @Column(nullable = false, length = 255)
     private String subject;
 
+    @Column(name = "password_hash", length = 60)
+    private String passwordHash;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -51,13 +54,22 @@ public class UserIdentity {
     protected UserIdentity() {
     }
 
-    public UserIdentity(User user, IdentityProvider provider, String subject) {
+    private UserIdentity(User user, IdentityProvider provider, String subject) {
         this.user = Objects.requireNonNull(user, "user must not be null");
         this.provider = Objects.requireNonNull(provider, "provider must not be null");
         if (subject == null || subject.isBlank()) {
             throw new IllegalArgumentException("subject must not be blank");
         }
         this.subject = subject;
+    }
+
+    public static UserIdentity local(User user, String loginId, String passwordHash) {
+        UserIdentity identity = new UserIdentity(user, IdentityProvider.LOCAL, loginId);
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new IllegalArgumentException("passwordHash must not be blank");
+        }
+        identity.passwordHash = passwordHash;
+        return identity;
     }
 
     public Long getId() {
@@ -74,6 +86,10 @@ public class UserIdentity {
 
     public String getSubject() {
         return subject;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
     }
 
     public Instant getCreatedAt() {

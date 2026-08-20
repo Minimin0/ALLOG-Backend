@@ -20,7 +20,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
-        "allog.auth.firebase.enabled=false",
         "allog.verification.media.enabled=true",
         "allog.verification.media.local-root=${java.io.tmpdir}/allog-local-upload-controller-test",
         "allog.verification.media.local-base-url=https://api.allog-app.store",

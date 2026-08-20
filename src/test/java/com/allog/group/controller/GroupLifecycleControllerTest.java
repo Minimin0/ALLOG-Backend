@@ -1,7 +1,7 @@
 package com.allog.group.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.service.GroupLifecycleException;
 import com.allog.group.service.MembershipLifecycleService;
 import com.allog.group.service.RoutineGroupJoinService;
@@ -26,7 +26,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class GroupLifecycleControllerTest {
@@ -116,7 +116,7 @@ class GroupLifecycleControllerTest {
     }
 
     private static MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request) {
-        return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return request.with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID))));
     }
 }

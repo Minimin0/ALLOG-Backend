@@ -1,7 +1,7 @@
 package com.allog.progress.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -386,7 +386,7 @@ class ProgressIntegrationTest {
             Long userId
     ) {
         return get("/api/v1/me/groups/{groupId}/progress", groupId)
-                .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                .with(authentication(AllogAuthenticationToken.authenticated(
                         new AllogPrincipal(userId)
                 )));
     }

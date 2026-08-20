@@ -1,7 +1,7 @@
 package com.allog.verification.analysis.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.verification.analysis.service.VerificationAnalysisClaimService;
 import com.allog.verification.analysis.service.VerificationAnalysisWorker;
 import org.junit.jupiter.api.Nested;
@@ -33,7 +33,6 @@ class VerificationAnalysisOperationsControllerTest {
 
     @Nested
     @SpringBootTest(properties = {
-            "allog.auth.firebase.enabled=false",
             "allog.verification.analysis.operations.operator-user-ids=7"
     })
     @AutoConfigureMockMvc
@@ -91,7 +90,7 @@ class VerificationAnalysisOperationsControllerTest {
     }
 
     private static MockHttpServletRequestBuilder as(Long userId, String endpoint) {
-        return post(endpoint).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return post(endpoint).with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(userId)
         )));
     }

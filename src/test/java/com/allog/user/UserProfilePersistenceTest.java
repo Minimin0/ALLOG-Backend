@@ -222,13 +222,13 @@ class UserProfilePersistenceTest {
     }
 
     @Test
-    void migrationSetIsExactlyV1ThroughV17() {
+    void migrationSetIsExactlyV1ThroughV18() {
         List<String> versions = jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = TRUE AND version IS NOT NULL"
                         + " ORDER BY CAST(version AS INT)", String.class);
 
         assertEquals(
-                List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"),
+                List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"),
                 versions);
     }
 }

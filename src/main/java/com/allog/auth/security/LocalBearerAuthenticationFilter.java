@@ -5,9 +5,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.AuthenticationServiceException;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,14 +14,14 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
-public class FirebaseBearerAuthenticationFilter extends OncePerRequestFilter {
+public class LocalBearerAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final AuthenticationManager authenticationManager;
+    private final AccessTokenService tokenService;
 
-    public FirebaseBearerAuthenticationFilter(AuthenticationManager authenticationManager) {
-        this.authenticationManager = authenticationManager;
+    public LocalBearerAuthenticationFilter(AccessTokenService tokenService) {
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -39,30 +36,24 @@ public class FirebaseBearerAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         if (headers.size() != 1) {
-            reject(response, HttpServletResponse.SC_UNAUTHORIZED);
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
 
-        String idToken = extractBearerToken(headers.getFirst());
-        if (idToken == null) {
-            reject(response, HttpServletResponse.SC_UNAUTHORIZED);
+        String token = extractBearerToken(headers.getFirst());
+        if (token == null) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
 
         try {
-            Authentication authentication = authenticationManager.authenticate(
-                    FirebaseBearerAuthenticationToken.unauthenticated(idToken)
-            );
             SecurityContext context = SecurityContextHolder.createEmptyContext();
-            context.setAuthentication(authentication);
+            context.setAuthentication(AllogAuthenticationToken.authenticated(tokenService.verify(token)));
             SecurityContextHolder.setContext(context);
             filterChain.doFilter(request, response);
-        } catch (AuthenticationServiceException exception) {
-            SecurityContextHolder.clearContext();
-            reject(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
         } catch (AuthenticationException exception) {
             SecurityContextHolder.clearContext();
-            reject(response, HttpServletResponse.SC_UNAUTHORIZED);
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         }
     }
 
@@ -71,13 +62,6 @@ public class FirebaseBearerAuthenticationFilter extends OncePerRequestFilter {
             return null;
         }
         String token = header.substring(BEARER_PREFIX.length());
-        if (token.isBlank() || token.chars().anyMatch(Character::isWhitespace)) {
-            return null;
-        }
-        return token;
-    }
-
-    private void reject(HttpServletResponse response, int status) {
-        response.setStatus(status);
+        return token.isBlank() || token.chars().anyMatch(Character::isWhitespace) ? null : token;
     }
 }

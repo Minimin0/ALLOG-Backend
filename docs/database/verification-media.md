@@ -11,7 +11,7 @@ Verification
 ```
 
 - `VerificationMediaStorage`가 storage 구현을 숨긴다. Domain/service layer는 local path나 filesystem API를 알지 못한다.
-- Object key는 `verification-media/{random UUID}` 형식으로 Backend가 생성한다. Client filename, email, 이름, Firebase UID는 key에 사용하지 않는다.
+- Object key는 `verification-media/{random UUID}` 형식으로 Backend가 생성한다. Client filename, login ID, 이름, user ID는 key에 사용하지 않는다.
 - Android는 authenticated `upload-intent`가 돌려준 `uploadUrl`, `method`, `requiredHeaders`, `expiresAt`만 사용한다. Android는 object key, local path, signing secret, AWS credential을 받지 않는다.
 - Upload URL은 `https://api.allog-app.store`의 signed temporary `PUT`이다. 요청은 nginx와 Spring Boot를 거쳐 private filesystem에 저장된다.
 - Signed grant는 method, opaque id, object key, normalized Content-Type, expected size, expiry를 HMAC-SHA256으로 binding한다. `If-None-Match: *`와 one-time grant consumption으로 public PUT의 overwrite/replay를 차단한다.

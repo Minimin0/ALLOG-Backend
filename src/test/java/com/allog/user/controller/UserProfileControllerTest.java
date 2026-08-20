@@ -1,7 +1,7 @@
 package com.allog.user.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.user.domain.UserProfileValidationException;
 import com.allog.user.dto.PatchUserProfileRequest;
 import com.allog.user.dto.UserProfileResponse;
@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class UserProfileControllerTest {
@@ -277,7 +277,7 @@ class UserProfileControllerTest {
     }
 
     private static MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request) {
-        return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return request.with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID))));
     }
 

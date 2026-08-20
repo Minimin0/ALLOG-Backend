@@ -1,7 +1,7 @@
 package com.allog.group.controller;
 
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMember;
 import com.allog.group.domain.GroupMemberRole;
 import com.allog.group.domain.GroupMemberStatus;
@@ -211,7 +211,7 @@ class GroupAccessControllerIntegrationTest {
     }
 
     private static MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request, Long userId) {
-        return request.with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return request.with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(userId))));
     }
 }

@@ -10,7 +10,7 @@ import com.allog.ai.coaching.production.AiCoachParticipationNotFoundException;
 import com.allog.ai.coaching.production.ProductionAiCoachApplicationService;
 import com.allog.ai.coaching.production.ProductionAiCoachResult;
 import com.allog.auth.security.AllogPrincipal;
-import com.allog.auth.security.FirebaseBearerAuthenticationToken;
+import com.allog.auth.security.AllogAuthenticationToken;
 import com.allog.group.domain.GroupMemberStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "allog.auth.firebase.enabled=false")
+@SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class ProductionAiCoachControllerTest {
@@ -201,7 +201,7 @@ class ProductionAiCoachControllerTest {
     @ValueSource(longs = {0, -1})
     void nonPositiveGroupIdReturns400WithoutCallingService(long groupId) throws Exception {
         mockMvc.perform(get("/api/v1/groups/{groupId}/ai-coach", groupId)
-                        .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                        .with(authentication(AllogAuthenticationToken.authenticated(
                                 new AllogPrincipal(USER_ID)
                         ))))
                 .andExpect(status().isBadRequest())
@@ -290,7 +290,7 @@ class ProductionAiCoachControllerTest {
     }
 
     private MockHttpServletRequestBuilder authenticatedGet() {
-        return get(ENDPOINT).with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+        return get(ENDPOINT).with(authentication(AllogAuthenticationToken.authenticated(
                 new AllogPrincipal(USER_ID)
         )));
     }
@@ -298,7 +298,7 @@ class ProductionAiCoachControllerTest {
     private MockHttpServletRequestBuilder authenticatedPost() {
         return post(FOLLOW_UP_ENDPOINT)
                 .contentType(MediaType.APPLICATION_JSON)
-                .with(authentication(FirebaseBearerAuthenticationToken.authenticated(
+                .with(authentication(AllogAuthenticationToken.authenticated(
                         new AllogPrincipal(USER_ID)
                 )));
     }

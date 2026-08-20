@@ -108,6 +108,6 @@ main
 
 ## Production integration contract
 
-Production API: https://api.allog-app.store. Android receives this endpoint only through EXPO_PUBLIC_API_BASE_URL. Firebase Admin credentials, database passwords, AI API keys, and local signing secrets are backend runtime secrets; none belong in Android bundles or source control.
+Production API: https://api.allog-app.store. Android receives this endpoint only through EXPO_PUBLIC_API_BASE_URL. Authentication signing keys, database passwords, AI API keys, and local signing secrets are backend runtime secrets; none belong in Android bundles or source control.
 
 Verification media follows Android -> nginx -> Spring -> Gabia private local filesystem. VerificationMediaStorage remains the abstraction and local filesystem is the production adapter. Group lifecycle, deadline, Heart balance, reward, and verification decisions remain backend authority; neither Android nor AI becomes a business-truth source.

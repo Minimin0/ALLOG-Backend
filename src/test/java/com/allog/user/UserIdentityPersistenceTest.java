@@ -47,18 +47,19 @@ class UserIdentityPersistenceTest {
     void persistsAndFindsIdentityByProviderAndSubject() {
         User user = User.create();
         entityManager.persist(user);
-        UserIdentity identity = new UserIdentity(user, IdentityProvider.FIREBASE, "firebase-user-123");
+        UserIdentity identity = UserIdentity.local(user, "local-user-123", "hash");
         repository.saveAndFlush(identity);
         entityManager.clear();
 
         UserIdentity found = repository
-                .findByProviderAndSubject(IdentityProvider.FIREBASE, "firebase-user-123")
+                .findByProviderAndSubject(IdentityProvider.LOCAL, "local-user-123")
                 .orElseThrow();
 
         assertEquals(identity.getId(), found.getId());
         assertEquals(user.getId(), found.getUser().getId());
-        assertEquals(IdentityProvider.FIREBASE, found.getProvider());
-        assertEquals("firebase-user-123", found.getSubject());
+        assertEquals(IdentityProvider.LOCAL, found.getProvider());
+        assertEquals("local-user-123", found.getSubject());
+        assertEquals("hash", found.getPasswordHash());
         assertNotNull(found.getCreatedAt());
         Timestamp storedCreatedAt = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM user_identity WHERE id = ?",
@@ -74,25 +75,18 @@ class UserIdentityPersistenceTest {
         User secondUser = User.create();
         entityManager.persist(firstUser);
         entityManager.persist(secondUser);
-        repository.saveAndFlush(new UserIdentity(
-                firstUser,
-                IdentityProvider.FIREBASE,
-                "duplicate-firebase-user"
-        ));
+        repository.saveAndFlush(UserIdentity.local(firstUser, "duplicate-local-user", "hash"));
 
-        assertThrows(DataIntegrityViolationException.class, () -> repository.saveAndFlush(new UserIdentity(
-                secondUser,
-                IdentityProvider.FIREBASE,
-                "duplicate-firebase-user"
-        )));
+        assertThrows(DataIntegrityViolationException.class, () -> repository.saveAndFlush(
+                UserIdentity.local(secondUser, "duplicate-local-user", "hash")));
     }
 
     @Test
     void allowsOneUserToHaveMultipleIdentities() {
         User user = User.create();
         entityManager.persist(user);
-        repository.save(new UserIdentity(user, IdentityProvider.FIREBASE, "firebase-user-one"));
-        repository.save(new UserIdentity(user, IdentityProvider.FIREBASE, "firebase-user-two"));
+        repository.save(UserIdentity.local(user, "local-user-one", "hash"));
+        repository.save(UserIdentity.local(user, "local-user-two", "hash"));
         entityManager.flush();
 
         assertEquals(2, repository.count());
