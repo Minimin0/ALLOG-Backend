@@ -147,19 +147,23 @@ Validation 오류 형식:
 - OpenAI 요청은 `store=false`로 Response 저장 비활성화를 요청한다. 조직 단위 데이터 보존 정책을 의미하지는 않는다.
 - Request Body와 전체 CoachContext는 로그하지 않는다.
 
-## Production API와의 차이
+## Production API
 
-Preview API는 DB Progress Domain과 분리된 개발용 경로라서 테스트 Fact를 직접 받는다. Android가 계산한 값을 신뢰하는 운영 구조가 아니다.
-
-향후 운영 흐름은 다음을 지켜야 한다.
+Preview API는 DB Progress Domain과 분리된 개발용 경로라서 테스트 Fact를 직접 받는다. Android가 계산한 값을 신뢰하는 운영 구조가 아니다. 운영 API는 인증된 사용자와 현재 DB 사실만 사용한다.
 
 ```text
-인증된 사용자 + groupId 또는 participationId
-→ Backend DB의 Schedule/Verification 조회
-→ Backend Progress Fact 계산
-→ AI Coach Application Service
+GET /api/v1/groups/{groupId}/ai-coach
+POST /api/v1/groups/{groupId}/ai-coach/follow-up
 ```
 
-운영 endpoint는 Group/Participation 및 인증 Domain이 확정된 뒤 결정한다. 후보는 그룹 리소스 중심의 `GET /api/v1/groups/{groupId}/ai-coach`와 참여 리소스 중심의 `GET /api/v1/participations/{participationId}/ai-coach`다. 개인별 진행 상태가 참여 관계에 귀속된다면 Participation 기준이 더 직접적이지만, 현재는 어느 것도 구현하거나 확정하지 않는다.
+GET 응답에는 `ACTIVE` 참여자에게만 다음 backend-owned `suggestedQuestions`가 포함된다.
 
-향후 관찰 항목은 선택된 Insight, 노출 메시지, CTA 클릭, 후속 인증 여부다. User/DB Domain이 생기기 전에는 Interaction 테이블을 만들지 않는다.
+```text
+PACE_CHECK
+NEXT_ACTION
+GROUP_PROGRESS
+```
+
+Follow-up request는 `{ "questionId": "PACE_CHECK" }` 형식이며 free-form question을 받지 않는다. Backend가 id를 신뢰된 instruction으로 변환해 기존 Progress/Insight/Provider/Template pipeline에 넣는다. Provider 실패는 기존 GET과 마찬가지로 `generationType=TEMPLATE`인 200 응답으로 degrade한다. 대화나 질문 기록은 저장하지 않는다.
+
+전체 production JSON과 status 계약은 [Android MVP API Contract](android-mvp-api-contract.md#ai-coach)를 따른다.

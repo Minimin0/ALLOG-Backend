@@ -1,7 +1,7 @@
 # ALLOG Android MVP API Contract
 
-Extracted from the code on `main` @ `2a8db59`. Where this document and the code disagree, the code
-wins — every field below was read out of a controller or DTO, not from a design note.
+Extracted from the production code on this branch. Where this document and the code disagree, the
+code wins — every field below was read out of a controller or DTO, not from a design note.
 
 ## Base
 
@@ -311,10 +311,28 @@ starts, or after it ends, only `participationStatus` is populated — bind them 
 ```json
 { "title": "…", "message": "…", "participationStatus": "ACTIVE",
   "insightType": "DEADLINE_APPROACHING", "routineState": "ATTENTION",
-  "actionType": "OPEN_CERTIFICATION", "actionLabel": "인증하기", "generationType": "TEMPLATE" }
+  "actionType": "OPEN_CERTIFICATION", "actionLabel": "인증하기", "generationType": "TEMPLATE",
+  "suggestedQuestions": [
+    { "id": "PACE_CHECK", "label": "지금 페이스 어때요?" },
+    { "id": "NEXT_ACTION", "label": "지금 가장 중요한 건 뭐예요?" },
+    { "id": "GROUP_PROGRESS", "label": "우리 그룹은 잘하고 있나요?" }
+  ] }
 ```
 `generationType` tells you whether the copy came from the model or the template fallback. The
 service always answers — a provider failure degrades to a template rather than erroring.
+`suggestedQuestions` contains these three backend-owned presets for `ACTIVE` participation and is
+an empty array for every other lifecycle status.
+
+### `POST /api/v1/groups/{groupId}/ai-coach/follow-up`
+**AUTH** required · **200** · **404** if not a member of the group
+```json
+{ "questionId": "PACE_CHECK" }
+```
+The response has the same shape as the GET response above. `questionId` must be one of
+`PACE_CHECK`, `NEXT_ACTION`, or `GROUP_PROGRESS`; missing or unknown values return **400**. The
+client cannot send free-form question text. The selected id is converted to a backend-owned trusted
+instruction and combined with current backend progress facts. Provider failure is still a **200**
+with `generationType: "TEMPLATE"`; follow-ups are transient and are not persisted.
 
 **Do not call** `POST /api/v1/dev/ai-coach/preview`: it is a dev-profile-only, unauthenticated
 preview and is not present in a normal deployment.

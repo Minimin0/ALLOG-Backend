@@ -1,6 +1,7 @@
 package com.allog.ai.coaching.dto;
 
 import com.allog.ai.coaching.domain.CompletionRiskLevel;
+import com.allog.ai.coaching.domain.FollowUpQuestion;
 import com.allog.ai.coaching.domain.InsightType;
 import com.allog.ai.coaching.domain.ProgressInsight;
 import com.allog.ai.coaching.domain.RoutineState;
@@ -15,7 +16,8 @@ public record CoachContext(
         Group group,
         Deadline deadline,
         SelectedInsight insight,
-        RoutineState routineState
+        RoutineState routineState,
+        FollowUp followUp
 ) {
 
     public CoachContext {
@@ -57,7 +59,21 @@ public record CoachContext(
                         snapshot.deadlinePassed()
                 ),
                 selected == null ? null : new SelectedInsight(selected.type(), selected.priority()),
-                routineState
+                routineState,
+                null
+        );
+    }
+
+    public CoachContext withFollowUp(FollowUpQuestion question) {
+        Objects.requireNonNull(question, "question must not be null");
+        return new CoachContext(
+                challenge,
+                progress,
+                group,
+                deadline,
+                insight,
+                routineState,
+                new FollowUp(question.name(), question.instruction())
         );
     }
 
@@ -90,5 +106,14 @@ public record CoachContext(
     }
 
     public record SelectedInsight(InsightType type, int priority) {
+    }
+
+    public record FollowUp(String id, String instruction) {
+
+        public FollowUp {
+            if (id == null || id.isBlank() || instruction == null || instruction.isBlank()) {
+                throw new IllegalArgumentException("follow-up intent must not be blank");
+            }
+        }
     }
 }

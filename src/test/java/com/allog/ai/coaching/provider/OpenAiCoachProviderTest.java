@@ -232,7 +232,8 @@ class OpenAiCoachProviderTest {
                 new CoachContext.Group(0.8),
                 new CoachContext.Deadline(Instant.parse("2026-08-07T09:00:00Z"), 60L, false),
                 new CoachContext.SelectedInsight(InsightType.VERIFICATION_PENDING, 1),
-                RoutineState.GOOD
+                RoutineState.GOOD,
+                null
         );
     }
 

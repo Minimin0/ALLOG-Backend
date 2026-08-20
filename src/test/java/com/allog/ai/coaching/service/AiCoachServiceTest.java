@@ -262,7 +262,8 @@ class AiCoachServiceTest {
                 new CoachContext.Group(0.8),
                 new CoachContext.Deadline(Instant.parse("2026-08-07T09:00:00Z"), 60L, false),
                 type == null ? null : new CoachContext.SelectedInsight(type, 1),
-                routineState
+                routineState,
+                null
         );
     }
 }
