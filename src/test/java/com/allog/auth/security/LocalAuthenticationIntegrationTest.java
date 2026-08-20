@@ -21,6 +21,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.ObjectMapper;
@@ -139,6 +140,31 @@ class LocalAuthenticationIntegrationTest {
     }
 
     @Test
+    void loginRateLimitReturns429PerClientWithoutLockingTheAccount() throws Exception {
+        signup("limited_user", PASSWORD);
+        String clientAddress = "198.51.100.23";
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            mockMvc.perform(loginAttempt("limited_user", "WrongPass123!", clientAddress, "203.0.113." + attempt))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(loginAttempt("limited_user", PASSWORD, clientAddress, "203.0.113.40"))
+                .andExpect(status().isOk());
+        for (int attempt = 0; attempt < 6; attempt++) {
+            mockMvc.perform(loginAttempt("limited_user", "WrongPass123!", clientAddress, "203.0.113." + (50 + attempt)))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(loginAttempt("different_user", "WrongPass123!", clientAddress, "203.0.113.99"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("LOGIN_RATE_LIMITED"))
+                .andExpect(jsonPath("$.error.message").value("로그인 시도가 너무 많아요. 잠시 후 다시 시도해 주세요."))
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
+        mockMvc.perform(loginAttempt("limited_user", PASSWORD, "198.51.100.24", "203.0.113.100"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void validLoginTokenAuthenticatesTheCorrectPrincipalStatelessly() throws Exception {
         signup("judge_user", PASSWORD);
         UserIdentity identity = identityRepository
@@ -196,6 +222,22 @@ class LocalAuthenticationIntegrationTest {
 
     private String login(String loginId, String password) throws Exception {
         return token(post(LOGIN).contentType(MediaType.APPLICATION_JSON).content(credentials(loginId, password)), 200);
+    }
+
+    private MockHttpServletRequestBuilder loginAttempt(
+            String loginId,
+            String password,
+            String remoteAddress,
+            String forwardedAddress
+    ) throws Exception {
+        return post(LOGIN)
+                .with(request -> {
+                    request.setRemoteAddr(remoteAddress);
+                    return request;
+                })
+                .header("X-Real-IP", forwardedAddress)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(credentials(loginId, password));
     }
 
     private String token(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request, int status)

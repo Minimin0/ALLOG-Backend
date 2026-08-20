@@ -1,6 +1,7 @@
 package com.allog.auth.controller;
 
 import com.allog.auth.application.LocalAuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,9 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final LocalAuthService authService;
+    private final LoginRateLimiter loginRateLimiter;
 
-    public AuthController(LocalAuthService authService) {
+    public AuthController(LocalAuthService authService, LoginRateLimiter loginRateLimiter) {
         this.authService = authService;
+        this.loginRateLimiter = loginRateLimiter;
     }
 
     @PostMapping("/signup")
@@ -26,7 +29,11 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public LocalAuthService.AuthResult login(@Valid @RequestBody AuthRequest request) {
+    public LocalAuthService.AuthResult login(
+            @Valid @RequestBody AuthRequest request,
+            HttpServletRequest servletRequest
+    ) {
+        loginRateLimiter.check(servletRequest);
         return authService.login(request.loginId(), request.password());
     }
 }
