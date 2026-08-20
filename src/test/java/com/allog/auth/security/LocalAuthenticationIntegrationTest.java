@@ -30,6 +30,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,6 +52,9 @@ class LocalAuthenticationIntegrationTest {
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String PRINCIPAL = "/test/auth/principal";
     private static final String PASSWORD = "JudgePass123!";
+    private static final AtomicInteger CLIENT_SEQUENCE = new AtomicInteger();
+
+    private String clientAddress;
 
     @Autowired
     private MockMvc mockMvc;
@@ -80,9 +84,14 @@ class LocalAuthenticationIntegrationTest {
         userRepository.deleteAll();
     }
 
+    @BeforeEach
+    void useUniqueClientAddress() {
+        clientAddress = "198.18.0." + CLIENT_SEQUENCE.incrementAndGet();
+    }
+
     @Test
     void signupNormalizesLoginIdHashesPasswordAndReturnsBoundedToken() throws Exception {
-        String body = mockMvc.perform(post(SIGNUP)
+        String body = mockMvc.perform(signupAttempt("  Allog_User  ", PASSWORD, clientAddress)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(credentials("  Allog_User  ", PASSWORD)))
                 .andExpect(status().isCreated())
@@ -107,7 +116,7 @@ class LocalAuthenticationIntegrationTest {
     void duplicateAndInvalidSignupUseStableClientErrors() throws Exception {
         signup("judge_user", PASSWORD);
 
-        mockMvc.perform(post(SIGNUP).contentType(MediaType.APPLICATION_JSON)
+        mockMvc.perform(signupAttempt("JUDGE_USER", PASSWORD, clientAddress).contentType(MediaType.APPLICATION_JSON)
                         .content(credentials("JUDGE_USER", PASSWORD)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("LOGIN_ID_ALREADY_EXISTS"));
@@ -150,18 +159,50 @@ class LocalAuthenticationIntegrationTest {
         }
         mockMvc.perform(loginAttempt("limited_user", PASSWORD, clientAddress, "203.0.113.40"))
                 .andExpect(status().isOk());
-        for (int attempt = 0; attempt < 6; attempt++) {
-            mockMvc.perform(loginAttempt("limited_user", "WrongPass123!", clientAddress, "203.0.113." + (50 + attempt)))
+        for (int attempt = 0; attempt < 3; attempt++) {
+            mockMvc.perform(loginAttempt("limited_user", PASSWORD, clientAddress, "203.0.113." + (41 + attempt)))
+                    .andExpect(status().isOk());
+        }
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String loginId = attempt % 2 == 0 ? "limited_user" : "unknown_" + attempt;
+            mockMvc.perform(loginAttempt(loginId, "WrongPass123!", clientAddress, "203.0.113." + (50 + attempt)))
                     .andExpect(status().isUnauthorized());
         }
 
-        mockMvc.perform(loginAttempt("different_user", "WrongPass123!", clientAddress, "203.0.113.99"))
+        mockMvc.perform(loginAttempt("limited_user", PASSWORD, clientAddress, "203.0.113.99"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.error.code").value("LOGIN_RATE_LIMITED"))
                 .andExpect(jsonPath("$.error.message").value("로그인 시도가 너무 많아요. 잠시 후 다시 시도해 주세요."))
                 .andExpect(jsonPath("$.accessToken").doesNotExist());
         mockMvc.perform(loginAttempt("limited_user", PASSWORD, "198.51.100.24", "203.0.113.100"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void signupLimitIsIndependentFromLoginFailures() throws Exception {
+        String signupClient = "198.51.100.30";
+        mockMvc.perform(signupAttempt("signup_limited", PASSWORD, signupClient))
+                .andExpect(status().isCreated());
+        for (int attempt = 0; attempt < 4; attempt++) {
+            mockMvc.perform(signupAttempt("signup_limited", PASSWORD, signupClient))
+                    .andExpect(status().isConflict());
+        }
+        mockMvc.perform(signupAttempt("signup_limited", PASSWORD, signupClient))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("SIGNUP_RATE_LIMITED"))
+                .andExpect(jsonPath("$.error.message").value("회원가입 시도가 너무 많아요. 잠시 후 다시 시도해 주세요."));
+        mockMvc.perform(loginAttempt("signup_limited", PASSWORD, signupClient, "203.0.113.30"))
+                .andExpect(status().isOk());
+        mockMvc.perform(signupAttempt("other_client", PASSWORD, "198.51.100.31"))
+                .andExpect(status().isCreated());
+
+        String loginClient = "198.51.100.32";
+        for (int attempt = 0; attempt < 10; attempt++) {
+            mockMvc.perform(loginAttempt("unknown_" + attempt, "WrongPass123!", loginClient, "203.0.113.32"))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(signupAttempt("login_limited_signup", PASSWORD, loginClient))
+                .andExpect(status().isCreated());
     }
 
     @Test
@@ -217,7 +258,7 @@ class LocalAuthenticationIntegrationTest {
     }
 
     private String signup(String loginId, String password) throws Exception {
-        return token(post(SIGNUP).contentType(MediaType.APPLICATION_JSON).content(credentials(loginId, password)), 201);
+        return token(signupAttempt(loginId, password, clientAddress), 201);
     }
 
     private String login(String loginId, String password) throws Exception {
@@ -236,6 +277,17 @@ class LocalAuthenticationIntegrationTest {
                     return request;
                 })
                 .header("X-Real-IP", forwardedAddress)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(credentials(loginId, password));
+    }
+
+    private MockHttpServletRequestBuilder signupAttempt(String loginId, String password, String remoteAddress)
+            throws Exception {
+        return post(SIGNUP)
+                .with(request -> {
+                    request.setRemoteAddr(remoteAddress);
+                    return request;
+                })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(credentials(loginId, password));
     }

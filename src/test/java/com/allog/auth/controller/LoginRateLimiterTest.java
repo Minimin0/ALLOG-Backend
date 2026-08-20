@@ -12,15 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LoginRateLimiterTest {
 
     @Test
-    void limitsOneClientForOneMinuteWithoutSleeping() {
+    void limitsFailedLoginsAndSignupsIndependentlyWithoutSleeping() {
         LoginRateLimiter limiter = new LoginRateLimiter();
         Instant startedAt = Instant.parse("2026-08-20T00:00:00Z");
+        String client = "198.51.100.10";
 
-        for (int attempt = 0; attempt < LoginRateLimiter.MAX_REQUESTS; attempt++) {
-            assertTrue(limiter.allow("198.51.100.10", startedAt));
+        for (int attempt = 0; attempt < LoginRateLimiter.MAX_LOGIN_FAILURES; attempt++) {
+            assertTrue(limiter.consumeLogin(client, startedAt));
         }
-        assertFalse(limiter.allow("198.51.100.10", startedAt));
-        assertTrue(limiter.allow("198.51.100.10", startedAt.plus(LoginRateLimiter.WINDOW)));
+        assertFalse(limiter.consumeLogin(client, startedAt));
+        assertTrue(limiter.consumeLogin(client, startedAt.plus(LoginRateLimiter.WINDOW)));
+
+        for (int attempt = 0; attempt < LoginRateLimiter.MAX_SIGNUP_REQUESTS; attempt++) {
+            assertTrue(limiter.consumeSignup(client, startedAt));
+        }
+        assertFalse(limiter.consumeSignup(client, startedAt));
     }
 
     @Test

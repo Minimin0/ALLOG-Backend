@@ -24,16 +24,22 @@ public class AuthController {
 
     @PostMapping("/signup")
     @ResponseStatus(HttpStatus.CREATED)
-    public LocalAuthService.AuthResult signup(@Valid @RequestBody AuthRequest request) {
+    public LocalAuthService.AuthResult signup(
+            @Valid @RequestBody AuthRequest request,
+            HttpServletRequest servletRequest
+    ) {
+        loginRateLimiter.checkSignup(servletRequest);
         return authService.signup(request.loginId(), request.password());
     }
 
     @PostMapping("/login")
     public LocalAuthService.AuthResult login(
             @Valid @RequestBody AuthRequest request,
-            HttpServletRequest servletRequest
+        HttpServletRequest servletRequest
     ) {
-        loginRateLimiter.check(servletRequest);
-        return authService.login(request.loginId(), request.password());
+        loginRateLimiter.checkLogin(servletRequest);
+        LocalAuthService.AuthResult result = authService.login(request.loginId(), request.password());
+        loginRateLimiter.resetLoginFailures(servletRequest);
+        return result;
     }
 }
