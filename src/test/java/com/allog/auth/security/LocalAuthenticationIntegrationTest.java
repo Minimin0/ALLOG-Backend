@@ -116,6 +116,9 @@ class LocalAuthenticationIntegrationTest {
         mockMvc.perform(post(SIGNUP).contentType(MediaType.APPLICATION_JSON)
                         .content(credentials("valid_id", "short")))
                 .andExpect(status().isBadRequest());
+        mockMvc.perform(post(SIGNUP).contentType(MediaType.APPLICATION_JSON)
+                        .content(credentials("valid_id", "가".repeat(25))))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
